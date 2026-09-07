@@ -187,3 +187,26 @@ unchanged (user approved Charizard). 3173 mock checks and syntax/whitespace pass
 Deployed InterfaceSprites.lua with backup and SHA256 verification. Actual
 animation stretching is not established by the screenshot; native pixels are
 not rescaled by this anchor change. Device visual confirmation remains pending.
+
+## Summary first-pose anchor and provider reflections (2026-09-07)
+
+User confirms Android single-image title replay fixed banding and Dex FULL/FIT
+looks good. FULL Summary now subtracts first frame opaque y0 from placement,
+retaining its approved horizontal centering and native size. No Dex changes.
+
+Found drawCast invoked normal provider drawEntity during reflectPlane pass;
+provider models bypass billboardMatrix, so their draw was not mirrored. Added
+optional drawReflection callback with reflectionPlane/reflectionRaise context.
+Unclaimed reflections use existing mirrored engine sprite; provider art needs
+the explicit callback to match its custom appearance in the water. Normal
+provider rendering unchanged. Original 55e195d canvas/shader path remains.
+
+Regression checks: water cast 47, heal overlay 63, ladders 38, cut drop 22,
+cut refresh 10, restored hooks 22 all pass. Original dfc177c ladder geometry,
+c083147 heal overlay alignment, 7991cce immediate prop removal retained.
+Cut removal still permits background mesh rebuilding as the original commit
+did; this is not a claim that every map rebuild has been eliminated.
+Interface checks 3174 plus 5 modern replay checks pass; Lua syntax and whitespace
+pass. Deployed InterfaceSprites, CharacterRenderers, VoxelScene with backup
+and verified hashes. Phone reflection visual verification remains pending.
+Uncommitted; published master/tag not moved.

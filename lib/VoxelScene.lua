@@ -835,7 +835,13 @@ local function drawCast(state, posed, atlasFor)
       local facing = viewFacing(p)
       local context = actorContext(state, p)
       context.facing = facing
-      local claimed = CharacterRenderers.first("drawEntity", context)
+      -- Normal provider draws do not use billboardMatrix and therefore do
+      -- not inherit reflectPlane. Only an explicit reflection callback may
+      -- claim this pass; otherwise retain the mirrored engine sprite.
+      context.reflectionPlane = reflectPlane
+      context.reflectionRaise = Water.CAST_RAISE
+      local claimed = CharacterRenderers.first(
+        reflectPlane and "drawReflection" or "drawEntity", context)
       if not claimed then
         drawEntity(p.sprite, p.px, p.py, facing, p.phase, p.flip, p.gh,
                    p.colors, p.lift, p.visualAnchorY)

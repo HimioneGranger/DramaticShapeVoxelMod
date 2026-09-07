@@ -17,6 +17,7 @@ local CharacterRenderers = {
 
 local CALLBACKS = {
   drawEntity = true,
+  drawReflection = true,
   drawShadow = true,
   suppressGhost = true,
   afterActors = true,

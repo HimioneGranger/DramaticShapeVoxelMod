@@ -298,7 +298,10 @@ local oldDraw = love.graphics.draw
 -- The SummaryMenu mock records the sprite; temporarily add the engine draw seam
 -- through its original implementation below via a test flag.
 summary.testDrawSprite = true
+frame1.testMetric = {y0=20,y1=59}
 SummaryMenu.draw(summary)
+ok(drawn[#drawn].args[2] == -20, "FULL Summary anchors first pose above shared animation padding")
+frame1.testMetric = nil
 ok(drawn[#drawn].args[1] == 80, "oversized mirrored FULL frame starts at x=0")
 frame2.w = savedWidth
 summary.testDrawSprite = nil
@@ -366,3 +369,40 @@ ok(wrapped(function() return "provider-rom.png" end, "rom-front.png",
   "ROM mode preserves the provider result for battle-kind menus")
 
 print(("%d checks passed (Interface Sprites install/playback)"):format(checks))
+
+-- Modern post-palette replay uses one masked image, not per-row scissors.
+setting.value, artMode, generation = "battle_art", "animated", "gen2"
+local P = package.loaded["src.render.PaletteFX"]
+local replays = {}
+P.pass = function() return "ui" end
+P.honorsTrueColor = function() return true end
+P.markUiSpriteRedraw = function(img, quad, x, y)
+  replays[#replays+1] = {image=img,x=x,y=y}
+end
+love.image = {newImageData=function(w,h)
+  local d={w=w,h=h,cleared={}}
+  function d:paste(source) self.source=source end
+  function d:setPixel(x,y,r,g,b,a) self.cleared[y*w+x]=a end
+  return d
+end}
+love.graphics.newImage = function(data)
+  return {data=data,setFilter=function() end}
+end
+trueColorMarks = {}
+title.player, title.playerQuads, title.monOffset = trainer, nil, 0
+TitleState.draw(title)
+ok(#replays == 1 and #trueColorMarks == 0,
+  "modern title replays once without row scissors")
+local replay = replays[1]
+local data = replay.image.data
+ok(data.cleared[(80-replay.y)*data.w+82-replay.x] == 0,
+  "single replay excludes opaque trainer pixel")
+ok(data.cleared[(80-replay.y)*data.w+83-replay.x] == nil,
+  "single replay preserves Pokemon behind transparent trainer area")
+TitleState.draw(title)
+ok(replays[2].image == replay.image, "unchanged title pose reuses masked image")
+P.pass = function() return "world" end
+trueColorMarks = {}
+TitleState.draw(title)
+ok(#replays == 2 and #trueColorMarks > 0, "non-UI pass retains safe fallback")
+print("5 modern title replay checks passed")

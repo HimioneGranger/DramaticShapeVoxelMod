@@ -213,7 +213,57 @@ local function trainerPixel(title, screenX, screenY)
   return sample(nil, 82, 80)
 end
 
+-- Modern engines can replay one alpha-masked Image after palette conversion.
+-- This avoids DPI-rounded scissors at every Pokemon pixel row on Android.
+local titleReplays = setmetatable({}, { __mode = "k" })
+local function replayTitleFrame(image, x, y, title)
+  local P = require("src.render.PaletteFX")
+  if not (P.markUiSpriteRedraw and P.pass and P.pass() == "ui"
+      and love.image and love.image.newImageData and love.graphics.newImage) then
+    return false
+  end
+  if P.honorsTrueColor and not P.honorsTrueColor() then return false end
+  local mon = alphaMask(image)
+  if not mon then return false end
+  local key = table.concat({tostring(x), tostring(y), tostring(title.player),
+    tostring(title.playerQuads), tostring(title.ballQuad), tostring(title.ballY),
+    tostring(title.__battleArtTrainerSource)}, "|")
+  local cache = titleReplays[title]
+  if not cache or cache.key ~= key then
+    cache = {key=key, frames=setmetatable({}, {__mode="k"})}
+    titleReplays[title] = cache
+  end
+  local replay = cache.frames[image]
+  if not replay then
+    local ok = pcall(function()
+      local source = BattleArt.imageData and BattleArt.imageData(image)
+        or image.newImageData and image:newImageData()
+      if not source then return end
+      local data = love.image.newImageData(mon.w, mon.h)
+      data:paste(source, 0, 0, 0, 0, mon.w, mon.h)
+      for sy = 0, mon.h - 1 do
+        for sx = 0, mon.w - 1 do
+          if mon.rows[sy][sx] then
+            local opaque, inside = trainerPixel(title, x + sx, y + sy)
+            if opaque or inside and not alphaMask(title.player,
+                title.__battleArtTrainerSource) then
+              data:setPixel(sx, sy, 0, 0, 0, 0)
+            end
+          end
+        end
+      end
+      replay = love.graphics.newImage(data)
+      replay:setFilter("nearest", "nearest")
+    end)
+    if not ok or not replay then return false end
+    cache.frames[image] = replay
+  end
+  P.markUiSpriteRedraw(replay, nil, x, y)
+  return true
+end
+
 local function markTitleFrame(image, x, y, title)
+  if replayTitleFrame(image, x, y, title) then return end
   local mon = alphaMask(image)
   if not mon then
     local w, h = image:getDimensions()
@@ -539,12 +589,15 @@ function InterfaceSprites.installSummary()
       local w, h = sprite:getDimensions()
       local py = math.max(0, 56 - h)
       local left = math.max(0, math.floor((72 - w) / 2))
+      local first = screenFrames(state)[1]
+      local metric = BattleArt.metrics and BattleArt.metrics(first)
+      local top = metric and -metric.y0 or py
       graphics.draw = function(image, x, y, ...)
-        if image == sprite and type(x) == "number" then x = x + left - 8 end
+        if image == sprite and type(x) == "number" then x, y = x + left - 8, top end
         return draw(image, x, y, ...)
       end
       P.markTrueColor = function(x, y, width, height)
-        if x == 8 and y == py and width == w and height == h then x = left end
+        if x == 8 and y == py and width == w and height == h then x, y = left, top end
         return mark(x, y, width, height)
       end
       local ok, err = pcall(originalDraw, self, ...)
