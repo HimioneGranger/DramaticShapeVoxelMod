@@ -36,6 +36,7 @@ local DayNight = V.require("DayNight")
 local GlassMask = V.require("GlassMask")
 local PixelCanvas = V.require("PixelCanvas")
 
+local AtmosphereCamera = V.require("AtmosphereCamera")
 local Voxel3D = {}
 
 -- Vertex format shared by terrain chunks and character models: a position,
@@ -71,6 +72,7 @@ Voxel3D.FACE_SHADE = {
 }
 
 local SHADER = [[
+  varying float weatherDistance;
   varying float vShade;
   varying float vFacadeBack;
   varying vec3 vSun;          // this fragment's place in the sun's view
@@ -102,6 +104,7 @@ local SHADER = [[
     vGrid = vertex_position.xyz;
 #endif
     vec4 w = model * vertex_position;
+    weatherDistance = max(0.0, length(w.xyz-eye)-300.0);
     // All four vertices of a marked facade lie on one Z plane, so this is
     // constant across its fragments. Work it out here where `eye` belongs;
     // the pixel stage only needs the yes/no result.
@@ -241,6 +244,10 @@ local SHADER = [[
   uniform vec3 ghostColor;    // the flat silhouette colour
   uniform float ghost;        // 0 = shade normally, 1 = flatten to it
   uniform float lightOn;      // 1 = scene lighting, 0 = texture true-colour
+  uniform float weatherHaze;
+  uniform vec3 weatherHazeColor;
+  uniform vec3 weatherMul;
+  uniform vec3 weatherAdd;
   uniform vec3 dayTint;       // the hour's light on the world; 1,1,1 = noon
   uniform Image glassMask;    // opaque where the atlas texel is window glass
   uniform vec2 glassSize;     // the mask's dimensions: tc -> atlas texels
@@ -322,6 +329,8 @@ local SHADER = [[
     // detail; replacing the colour outright is what makes it read as one
     // solid silhouette. Last in the chain, so neither the sun nor a voxel
     // seam can mottle it.
+    rgb = clamp(rgb * weatherMul + weatherAdd, 0.0, 1.0);
+    rgb = mix(rgb, weatherHazeColor, min(0.28, 1.0-exp(-weatherHaze*weatherDistance)));
     rgb = mix(rgb, ghostColor, ghost);
     return vec4(rgb, 1.0) * color;
   }
@@ -719,7 +728,10 @@ end
 -- View and projection for a `vw` x `vh` world-pixel view centred on
 -- (cx, cy) in world pixels. Returns the combined matrix.
 function Voxel3D.viewProjection(cx, cy, vw, vh)
+  Voxel3D.atmosphereCameraCandidate=nil
   local cam = Voxel3D.camera
+  local externalEye=cam and (cam.view or cam.proj or cam.eyeIndex~=nil or cam.stereo==true)
+  local cameraMode=Voxel.isFirstPerson() and 'first_person' or (Voxel.isThirdPerson() and 'third_person' or 'diorama')
   if cam then
     cam = cameraWithDelta(cam)
     local eye, focus = cam.eye, cam.focus
@@ -746,6 +758,7 @@ function Voxel3D.viewProjection(cx, cy, vw, vh)
     -- may hand its own up: the first-person BLEND does, because its far
     -- end is the orbit, whose up leans with the pitch -- world up at the
     -- orbit's steep end degenerates against a straight-down view.
+    if not externalEye then Voxel3D.atmosphereCameraCandidate=AtmosphereCamera.build(eye,focus,cam.up or {0,1,0},math.max(1,dist*.05),dist*4+4096,cam.fov,cameraMode) end
     return Mat4.mul(proj, Mat4.lookAt(eye, focus, cam.up or { 0, 1, 0 }))
   end
 
@@ -777,6 +790,7 @@ function Voxel3D.viewProjection(cx, cy, vw, vh)
   -- downward. Winding flips with it, which is free here because the pass
   -- draws with culling off.
   proj = Mat4.mul(Mat4.scale(1, -1, 1), proj)
+  Voxel3D.atmosphereCameraCandidate=AtmosphereCamera.build(eye,focus,up,math.max(1,dist*.05),dist*4+4096,fov,cameraMode)
   return Mat4.mul(proj, Mat4.lookAt(eye, focus, up))
 end
 
@@ -877,6 +891,9 @@ end
 -- `slot` names which cached canvas to render into (see `slots` above);
 -- omitted is the free-roam world pass.
 function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot, modelShadow, borrowed)
+  Voxel3D.atmosphereCameraCandidate=nil
+  Sky.resetDeferredBody()
+  Sky.allowDeferredBody = not borrowed and sky and sky.bands ~= nil
   -- the wireframe variant when the player has it on AND it built; either
   -- answer falls through to the plain scene rather than to no scene
   local grid = VoxelGrid.enabled()
@@ -1002,6 +1019,12 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot, modelShadow, borrow
   pcall(sh.send, sh, "lightOn", 1)
   -- the hour's light, as the caller last set it (see Voxel3D.tint)
   pcall(sh.send, sh, "dayTint", Voxel3D.tint or { 1, 1, 1 })
+  local weather = (not borrowed and sky and V.companion and V.companion.atmosphereSnapshot)
+    and V.companion:atmosphereSnapshot() or {}
+  pcall(sh.send, sh, "weatherHaze", weather.haze and weather.haze.density or 0)
+  pcall(sh.send, sh, "weatherHazeColor", weather.haze and weather.haze.color or {0,0,0})
+  pcall(sh.send, sh, "weatherMul", weather.tint and weather.tint.multiplier or {1,1,1})
+  pcall(sh.send, sh, "weatherAdd", weather.tint and weather.tint.additive or {0,0,0})
   -- the window glass: the tileset's mask (or the blank -- the sampler is
   -- declared either way, and unbound is a driver-dependent crash), how lit
   -- the panes are, and the movement-fed glint as the caller last set it

@@ -1417,7 +1417,8 @@ function Water.sendSky(sh, ctx)
   send("skyStart", Sky.DITHER and Sky.DITHER_START or 2)
   send("skyOn", 1)
 
-  local body = DayNight.body()
+  local replaced = V.companion and V.companion.celestialWasReplaced and V.companion:celestialWasReplaced()
+  local body = not replaced and DayNight.body() or nil
   if not body then
     send("bodyOn", 0)
     send("glowAmt", 0)
