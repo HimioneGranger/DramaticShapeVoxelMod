@@ -1448,6 +1448,12 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
     Voxel3D.endShadows()
   end
 
+  -- Draft effects: queued extension celestials and sky geometry retain per-eye depth.
+  if companion and companion.renderAtmosphere then
+    companion:renderAtmosphere("celestial_before_clouds", state)
+    companion:renderAtmosphere("sky_deck", state)
+  end
+
   -- and the water over the top of it, reflecting everything just drawn plus
   -- the sky the frame opened with (see drawWater).
   --
@@ -1572,8 +1578,12 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
     pcall(companion.render, companion, "translucent_after_actors", state)
   end
 
+  if companion and companion.renderAtmosphere then
+    companion:renderAtmosphere("translucent_after_actors", state)
+  end
   if state.map.id == "MUSEUM_1F" then V.require("MuseumFossils").drawGlass(state.map) end
   local finished = Voxel3D.endScene()
+  if finished and companion and companion.completeAtmosphereCamera then companion:completeAtmosphereCamera(state) end
   -- The delta belongs only to this overworld render. Do not let it reach a
   -- later battle or another owner of Voxel3D's placed-camera seam.
   Voxel3D.setCompanionCameraDelta(nil)

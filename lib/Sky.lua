@@ -217,6 +217,7 @@ uniform float glowAmt;  // twilight warmth around the low sun; 0 = none
 uniform vec2 glowPos;   // the sun disc, in canvas pixels (flat path)
 uniform float glowInvR; // 1 / the glow's reach in pixels (flat path)
 uniform vec3 glowDir;   // the sun's world direction (ray path)
+uniform vec2 weatherAtmosphere;
 uniform float glowInvA; // 1 / the glow's reach in radians (ray path)
 uniform vec3 glowColor;
 
@@ -270,6 +271,7 @@ vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
     float g = glowAmt * pow(clamp(1.0 - glowD, 0.0, 1.0), 2.0);
     c = mix(c, glowColor, clamp(g, 0.0, 1.0) * 0.65);
   }
+  c = clamp(c * (1.0-weatherAtmosphere.x) + vec3(0.70,0.80,1.0)*weatherAtmosphere.y, 0.0, 1.0);
   return vec4(c, alpha);
 }
 ]]
@@ -528,6 +530,45 @@ local function paintDisc(body, edge, cell, w, h)
   g.setColor(1, 1, 1, 1)
 end
 
+-- Private draft: postpone only the native flat-camera disc until the owned
+-- celestial queue succeeds. On failure the same native pixels draw at sky depth.
+local deferredBody, fallbackDiscShader
+local function celestialTarget() local c=love.graphics.getCanvas();while type(c)=='table' do c=c[1] or c.canvas end;return c end
+Sky.nativeCelestialReplaced = false
+function Sky.resetDeferredBody()
+  deferredBody=nil;Sky.nativeCelestialReplaced=false;Sky.allowDeferredBody=false
+end
+local function deferBody(body,edge,cell,w,h)
+  if not body or not Sky.allowDeferredBody or not(V.companion and V.companion.canReplaceCelestials and V.companion:canReplaceCelestials())then return false end
+  if not fallbackDiscShader then
+    local ok,sh=pcall(love.graphics.newShader,[[
+#ifdef VERTEX
+vec4 position(mat4 m,vec4 v){vec4 c=m*v;c.z=c.w*0.99999;return c;}
+#endif
+#ifdef PIXEL
+vec4 effect(vec4 c,Image t,vec2 uv,vec2 px){return c*Texel(t,uv);}
+#endif
+]])
+    if not ok then return false end;fallbackDiscShader=sh
+  end
+  local b={};for k,v in pairs(body)do b[k]=v end
+  deferredBody={body=b,edge=edge,cell=cell,w=w,h=h,canvas=celestialTarget()};return true
+end
+function Sky.flushDeferredBody(replaced)
+  local p=deferredBody;deferredBody=nil
+  if not p then return true end
+  Sky.nativeCelestialReplaced=replaced==true
+  if replaced then return true end
+  local g=love.graphics
+  if celestialTarget()~=p.canvas then return nil,'native celestial target changed' end
+  g.push('all')
+  local ok,err=pcall(function()
+    g.origin();g.setShader(fallbackDiscShader);g.setDepthMode('lequal',false);g.setBlendMode('alpha','alphamultiply')
+    paintDisc(p.body,p.edge,p.cell,p.w,p.h)
+  end)
+  g.pop();return ok,err
+end
+
 -- ------- the disc as a TEXTURE, for the VR eyes
 --
 -- A VR eye must not paint the disc in screen space at all: a canvas-grid
@@ -674,37 +715,46 @@ function Sky.paint(w, h, sky, horizonY, cell, body, top, axis, ray)
     local d = ax * bx + ay * by + az * bz
     return math.acos(math.max(-1, math.min(1, d)))
   end
+  local weather = V.companion and V.companion.atmosphereSnapshot and V.companion:atmosphereSnapshot() or {}
   local sh = getShader()
+  local function send(name,...)
+    -- Release shaders optimized out legacy dither uniforms. Preserve the stock
+    -- no-provider path; an active atmosphere must not silently fall back before
+    -- its live uniforms are sent.
+    if weather.sky and sh.hasUniform and not sh:hasUniform(name)then return end
+    return sh:send(name,...)
+  end
   local ramp = sh and rampFor(bands)
   if not ramp then sh = nil end       -- no ramp, no gradient: paint it flat
   if sh then
     local sent = pcall(function()
       -- the bands arrive as a texture, one texel each, and `count` is that
       -- texture's width -- see rampFor for why they are not a uniform array
-      sh:send("ramp", ramp)
-      sh:send("count", #bands)
-      sh:send("edge", edge)
-      sh:send("top", math.min(top or 0, edge - 1))
-      sh:send("axisX", axis and axis[1] or 0)
-      sh:send("axisY", axis and axis[2] or 1)
-      sh:send("useRay", ray and 1 or 0)
+      send("ramp", ramp)
+      send("count", #bands)
+      send("edge", edge)
+      send("top", math.min(top or 0, edge - 1))
+      send("axisX", axis and axis[1] or 0)
+      send("axisY", axis and axis[2] or 1)
+      send("useRay", ray and 1 or 0)
       if ray then
-        sh:send("rayBase", ray.base)
-        sh:send("rayDu", ray.du)
-        sh:send("rayDv", ray.dv)
-        sh:send("raySpan", Sky.ELEV_SPAN)
-        sh:send("invSize", { 1 / w, 1 / h })
+        send("rayBase", ray.base)
+        send("rayDu", ray.du)
+        send("rayDv", ray.dv)
+        send("raySpan", Sky.ELEV_SPAN)
+        send("invSize", { 1 / w, 1 / h })
         -- the angular checker's cell: the angle one dither cell spans at
         -- the frame's centre, so the sky-glued grid comes out the same
         -- size on screen as the diorama's own pixel grid
-        sh:send("cellAng",
+        send("cellAng",
                 math.max(1e-4, rayAngle(0.5, 0, 0.5, 1) * skyCell / h))
       end
-      sh:send("cell", skyCell)
-      sh:send("start", Sky.DITHER and Sky.DITHER_START or 2)
-      sh:send("ditherBlend", Sky.DITHER_BLEND)
-      sh:send("alpha", alpha)
-      sh:send("glowAmt", glowAmt)
+      send("cell", skyCell)
+      send("start", Sky.DITHER and Sky.DITHER_START or 2)
+      send("ditherBlend", Sky.DITHER_BLEND)
+      send("alpha", alpha)
+      send("weatherAtmosphere", {weather.sky and weather.sky.dim or 0, weather.sky and weather.sky.flash or 0})
+      send("glowAmt", glowAmt)
       if glowAmt > 0 then
         local gc = body.glowColor or { 248, 224, 168 }
         if ray then
@@ -713,14 +763,14 @@ function Sky.paint(w, h, sky, horizonY, cell, body, top, axis, ray)
           -- of the frame, so the two paths agree on how wide it looks
           local dx, dy, dz = body.dx, body.dy, body.dz
           local l = math.sqrt(dx * dx + dy * dy + dz * dz)
-          sh:send("glowDir", { dx / l, dy / l, dz / l })
-          sh:send("glowInvA", 1 / math.max(
+          send("glowDir", { dx / l, dy / l, dz / l })
+          send("glowInvA", 1 / math.max(
             1e-3, rayAngle(0, 0.5, 1, 0.5) * Sky.GLOW_REACH))
         else
-          sh:send("glowPos", { body.x, body.y })
-          sh:send("glowInvR", 1 / math.max(1, w * Sky.GLOW_REACH))
+          send("glowPos", { body.x, body.y })
+          send("glowInvR", 1 / math.max(1, w * Sky.GLOW_REACH))
         end
-        sh:send("glowColor", { gc[1] / 255, gc[2] / 255, gc[3] / 255 })
+        send("glowColor", { gc[1] / 255, gc[2] / 255, gc[3] / 255 })
       end
     end)
     if sent then
@@ -736,6 +786,14 @@ function Sky.paint(w, h, sky, horizonY, cell, body, top, axis, ray)
     end
   end
   if not sh then
+    if weather.sky then
+      local adjusted={}
+      for i,c in ipairs(bands)do
+        adjusted[i]={}
+        for k,f in ipairs({.70,.80,1})do adjusted[i][k]=math.max(0,math.min(1,c[k]*(1-(weather.sky.dim or 0))+f*(weather.sky.flash or 0)))end
+      end
+      bands=adjusted
+    end
     paintFlat(w, h, bands, (axis or ray) and math.min(h, edge) or edge,
               alpha, cell, math.min(top or 0, edge - 1))
   end
@@ -744,7 +802,7 @@ function Sky.paint(w, h, sky, horizonY, cell, body, top, axis, ray)
   -- those cameras hang the baked disc in the world instead (drawWorldDisc,
   -- with Sky.discImage)
   if not (axis or ray) then
-    paintDisc(body, math.min(h, edge), cell, w, h)
+    if not deferBody(body, math.min(h, edge), cell, w, h) then paintDisc(body, math.min(h, edge), cell, w, h) end
   end
   g.setColor(1, 1, 1, 1)
 
@@ -758,6 +816,8 @@ end
 -- context builds a new one instead of drawing with a handle from the old. The
 -- ramp is a GPU object on the same context and goes with it.
 function Sky.invalidate()
+  Sky.resetDeferredBody()
+  if fallbackDiscShader then fallbackDiscShader:release();fallbackDiscShader=nil end
   shader = nil
   if cache.ramp and cache.ramp.release then pcall(cache.ramp.release, cache.ramp) end
   cache.ramp, cache.rampFor = nil, nil

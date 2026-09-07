@@ -17,6 +17,8 @@ local Voxel3D = V.require("Voxel3D")
 local DayNight = V.require("DayNight")
 local Map = require("src.world.Map")
 
+local AtmosphereEffects = V.require("AtmosphereEffects")
+local AtmosphereCamera = V.require("AtmosphereCamera")
 local VoxelCompanion = {}
 VoxelCompanion.__index = VoxelCompanion
 
@@ -123,7 +125,8 @@ local LEGACY_MARKERS = {
     "Jump.swayZ(me)",
   },
   ["lib/Structures.lua"] = {
-    "__ds_tree_lift",
+    -- __ds_tree_lift is also in the official 1.10.4 Structures source;
+    -- that single flag is not sufficient evidence of a legacy splice.
     "__ds_round_key",
     "__ds_round_tomb",
     'rawget(_G, "__ds_ceiling_config")',
@@ -1810,6 +1813,7 @@ function VoxelCompanion.new(options)
     status = function() return copyIntegrity(self.integrity) end,
   }
 
+  self.atmosphereEffects = AtmosphereEffects.new()
   self.dispatcher = API.new({
     host_id = "BATTLE_ART_VOXEL_FORK",
     host_version = "1.9.7",
@@ -1826,6 +1830,8 @@ function VoxelCompanion.new(options)
   local raw = self.dispatcher:provider()
   self.provider = raw
   raw.capabilities.visual_object_overrides = 2
+  -- Draft service: full weather renderer readiness is deliberately not advertised.
+  raw.capabilities.atmosphere_effects_draft = 1
   local register = raw.register
   raw.register = function(spec)
     self.integrity = scanIntegrity(mod)
@@ -1906,6 +1912,7 @@ function VoxelCompanion:_observeState(state)
   local changed = mapIdentity ~= self.mapIdentity
     or timeIdentity ~= self.timeIdentity
   if changed then
+    if mapIdentity ~= self.mapIdentity and self.atmosphereEffects then self.atmosphereEffects.reset();self.completedAtmosphereCamera=nil end
     self.mapIdentity, self.timeIdentity = mapIdentity, timeIdentity
     self:worldChanged("observed_world_identity")
   end
@@ -1931,6 +1938,12 @@ function VoxelCompanion:update(dt, state)
   local changed = self:_observeState(state)
   self.frame = updateFrame(self, dt)
   self.frameDraws = 0
+  local def = self.state and self.state.map and self.state.map.def
+  local okOutdoor, outdoor = pcall(Map.isOutdoor, def)
+  local mode=Voxel.isFirstPerson() and 'first_person' or (Voxel.isThirdPerson() and 'third_person' or 'diorama')
+  local centerCamera=AtmosphereCamera.snapshot(self.completedAtmosphereCamera,self.frameIndex,self.frame.mapId,mode)
+  self.atmosphereEffects.beginFrame(self.frameIndex, (okOutdoor and outdoor == true)
+    or (self.state and self.state.map and self.state.map.id == "SAFARI_ZONE_CENTER"),centerCamera)
   if not self.started then return false end
   if (changed or self.worldPending) and self.state and self.state.map
       and self.clock >= self.nextSnapshotAttempt then
@@ -1998,7 +2011,7 @@ local function callExtension(self, record, stage, handler, ...)
   end, function(problem) return problem end)
   self.callbackRecord, self.callbackStage = previousRecord, previousStage
   self.callbackDepth = previousDepth
-  if not ok then error(result, 0) end
+  if not ok then self.atmosphereEffects.revoke(record.id); error(result, 0) end
   return unpackValues(result, 1, result.n)
 end
 
@@ -2025,7 +2038,7 @@ local function filterVisualCapability(source)
   if type(source) ~= "table" then return source end
   local out, write = {}, 0
   for index = 1, #source do
-    if source[index] ~= "visual_object_overrides" then
+    if source[index] ~= "visual_object_overrides" and source[index] ~= "atmosphere_effects_draft" then
       write = write + 1
       out[write] = source[index]
     end
@@ -2088,7 +2101,7 @@ wrapSpec = function(self, spec, record)
       local callbackName, callback = name, handler
       out[callbackName] = function(...)
         if callbackName == "invalidate" or callbackName == "dispose" then
-          self.visuals:clear(record)
+          self.visuals:clear(record); self.atmosphereEffects.revoke(record.id)
         end
         return callExtension(self, record, callbackName, callback, ...)
       end
@@ -2121,13 +2134,13 @@ wrapSpec = function(self, spec, record)
   if not hasDispose then
     out.lifecycle = out.lifecycle or {}
     out.lifecycle.dispose = function()
-      self.visuals:clear(record)
+      self.visuals:clear(record); self.atmosphereEffects.revoke(record.id)
     end
   elseif type(spec.lifecycle) == "table"
       and type(spec.lifecycle.dispose) == "function" then
     local handler = spec.lifecycle.dispose
     out.lifecycle.dispose = function(...)
-      self.visuals:clear(record)
+      self.visuals:clear(record); self.atmosphereEffects.revoke(record.id)
       return callExtension(self, record, "lifecycle.dispose", handler, ...)
     end
   end
@@ -2159,6 +2172,39 @@ function VisualHandle:status()
   return status
 end
 
+function VisualHandle:effects()
+  local state = visualHandleState(self)
+  if not state.raw:is_active() then return nil, "extension is not active" end
+  return state.host.atmosphereEffects.owner(state.raw:id())
+end
+
+function VoxelCompanion:completeAtmosphereCamera(state)
+  self.completedAtmosphereCamera=AtmosphereCamera.complete(Voxel3D.atmosphereCameraCandidate,
+    self.frameIndex,state and state.map and state.map.id)
+end
+
+function VoxelCompanion:atmosphereSnapshot()
+  return self.atmosphereEffects.snapshot()
+end
+
+function VoxelCompanion:canReplaceCelestials()
+  return self.started and self.atmosphereEffects.wantsCelestials()
+end
+function VoxelCompanion:celestialWasReplaced()
+  return V.require('Sky').nativeCelestialReplaced == true
+end
+function VoxelCompanion:renderAtmosphere(phase, state)
+  local def = state and state.map and state.map.def
+  local ok, outdoor = pcall(Map.isOutdoor, def)
+  local result,err=self.atmosphereEffects.draw(phase, Voxel3D.vp, Voxel3D.eye,
+    (ok and outdoor == true) or (state and state.map and state.map.id == "SAFARI_ZONE_CENTER"))
+  if phase=='celestial_before_clouds' then
+    local restored,restoreError=V.require('Sky').flushDeferredBody(self.atmosphereEffects.celestialsDrawn())
+    if not restored then return nil,restoreError end
+  end
+  return result,err
+end
+
 function VisualHandle:claim_visual_objects(ids)
   local state = visualHandleState(self)
   return state.host.visuals:claim(state.record, ids)
@@ -2167,14 +2213,14 @@ end
 function VisualHandle:invalidate(context, reason)
   local state = visualHandleState(self)
   local ok, err = state.raw:invalidate(context, reason)
-  if ok then state.host.visuals:clear(state.record) end
+  if ok then state.host.visuals:clear(state.record); state.host.atmosphereEffects.revoke(state.raw:id()) end
   return ok, err
 end
 
 function VisualHandle:dispose(context, reason)
   local state = visualHandleState(self)
   local ok, err = state.raw:dispose(context, reason)
-  if ok then state.host.visuals:remove(state.record) end
+  if ok then state.host.visuals:remove(state.record); state.host.atmosphereEffects.revoke(state.raw:id()) end
   return ok, err
 end
 
@@ -2209,6 +2255,8 @@ function VoxelCompanion:render(phase, state)
 end
 
 function VoxelCompanion:invalidate(reason)
+  self.completedAtmosphereCamera=nil
+  self.atmosphereEffects.reset()
   self:worldChanged(reason or "host_invalidated")
   self.visuals:clearAll()
   for key, mesh in pairs(self.meshes) do

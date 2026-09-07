@@ -1,3 +1,11 @@
+# Companion atmosphere extension — 2026-09-07
+
+Optional draft effects API: owner-scoped resources, per-eye queues, bounded
+atmosphere state, desktop camera facts and native celestial fallback.
+See docs/COMPANION_ATMOSPHERE.md for contract and validation limits.
+The official 1.10.4 tree-lift flag no longer falsely blocks registration.
+No manifest/cache bump, companion art/runtime, or gameplay changes.
+
 # Requested world-feature restoration — 2026-09-06
 
 Audited the active `DramaticShapeVoxelMod` checkout on local `master` at
