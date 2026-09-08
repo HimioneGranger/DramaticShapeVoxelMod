@@ -1,3 +1,22 @@
+# Safari canopy palette and pixel shading — 2026-09-07
+
+Safari shrubs now use fixed one-world-unit surface pixels, connected edge/lower
+shadow patches and checkerboard transitions. Color assignment precedes greedy
+face merging, preventing stretched texture marks. Voxel occupancy, placements,
+collision and draw-call count are unchanged; solid swatches remain 6x1.
+
+The shared FOREST tree canopy receives the existing olive mapping only inside
+the four outdoor Safari maps. Bark, alpha and other maps retain their original
+colors. Native atlas comparison found 578 changed leaf pixels and no other
+pixel changes.
+
+Validation: native desktop engine 0.2.27 paired captures passed without stderr.
+The representative Center scene contains 86 shrubs: 266,996 vertices versus
+83,564 in the previous material/geometry (about 3.2x). This is the approved visual
+prototype, not a Quest performance clearance. Texture-chart optimization should
+preserve the approved appearance before a Quest release; Quest/GLES and exact
+0.2.53 gameplay have not been tested. No live installation or cache schema change.
+
 # Companion atmosphere extension — 2026-09-07
 
 Optional draft effects API: owner-scoped resources, per-eye queues, bounded
