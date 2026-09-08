@@ -976,7 +976,11 @@ local function safariGround(map,base,baked)
   local w,h=raw:getDimensions();local data=love.image.newImageData(w,h);data:paste(raw,0,0,0,0,w,h)
   if not baked then raw:release()end
   local perRow=map.tileset.tilesPerRow or 16
-  for _,tile in ipairs({0,48,32,52,55,57,72,73,74,80,81,82,83,95})do
+  -- The shared FOREST canopy uses the drawing anchored at 4 and edge tile 35.
+  -- Recolor its green pixels only in this Safari-owned atlas; retain bark,
+  -- source pixel detail and the original tree palette on every other map.
+  for _,tile in ipairs({0,48,32,52,55,57,72,73,74,80,81,82,83,95,
+    4,5,6,7,20,21,22,23,35,36,37,38,39,53,54})do
    local sx,sy=tile%perRow*8,math.floor(tile/perRow)*8
    for y=0,7 do for x=0,7 do
     local rr,gg,bb,aa=data:getPixel(sx+x,sy+y)

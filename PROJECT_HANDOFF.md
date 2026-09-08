@@ -1,3 +1,41 @@
+# PR #51 merge verification — 2026-09-08
+
+Merged PR head `1e07e7f` into current master `22f5b03` in an isolated worktree.
+The merge is conflict-free. Only SafariFoliage.lua, TerrainAtlas.lua and this
+handoff change; all other tracked files match the target branch, retaining
+restored ladders, heal overlays, water reflections, immediate cut removal,
+interface fixes and PR #50 companion atmosphere support.
+
+Fresh Lua 5.1/LuaJIT headless checks passed: cave ladders, heal overlays, water
+cast reflection, cut drop/mesh refresh, restored pipeline hooks, precache OFF
+policy/integration, Safari walls/stairs/foliage bounds, museum fossils, NATURE
+underlay, build budgets, disk storage, interface install/playback (3174 checks
+plus 5 modern title checks), atlas decoding, native anchors, companion atmosphere
+integration and camera/projection facts. Syntax and whitespace checks pass.
+Initial harness working-directory/arg errors were corrected and those suites
+rerun successfully. These checks are mocked/headless, not device visual tests.
+The PR author's 3.2x shrub geometry cost remains a mobile/Quest performance
+limitation; their desktop capture claims above were not repeated in this audit.
+
+# Safari canopy palette and pixel shading — 2026-09-07
+
+Safari shrubs now use fixed one-world-unit surface pixels, connected edge/lower
+shadow patches and checkerboard transitions. Color assignment precedes greedy
+face merging, preventing stretched texture marks. Voxel occupancy, placements,
+collision and draw-call count are unchanged; solid swatches remain 6x1.
+
+The shared FOREST tree canopy receives the existing olive mapping only inside
+the four outdoor Safari maps. Bark, alpha and other maps retain their original
+colors. Native atlas comparison found 578 changed leaf pixels and no other
+pixel changes.
+
+Validation: native desktop engine 0.2.27 paired captures passed without stderr.
+The representative Center scene contains 86 shrubs: 266,996 vertices versus
+83,564 in the previous material/geometry (about 3.2x). This is the approved visual
+prototype, not a Quest performance clearance. Texture-chart optimization should
+preserve the approved appearance before a Quest release; Quest/GLES and exact
+0.2.53 gameplay have not been tested. No live installation or cache schema change.
+
 # Companion atmosphere extension — 2026-09-07
 
 Optional draft effects API: owner-scoped resources, per-eye queues, bounded

@@ -41,9 +41,53 @@ function M.geometry(ps)
  end
  local D=V.require('Voxel3D');local dirs={{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}}
  local axes={{1,2,3},{1,2,3},{2,1,3},{2,1,3},{3,1,2},{3,1,2}};local groups={}
+ -- Shade exposed surfaces on a fixed one-world-unit pixel grid.
+ -- Greedy merging happens AFTER color assignment, so it cannot stretch pixels.
+ local function leafAt(x,y,z)
+  local n=vox[key(x,y,z)]
+  return n and n[4]>=2 and n[4]<=5
+ end
  for _,v in pairs(vox)do for f,d in ipairs(dirs)do if not vox[key(v[1]+d[1],v[2]+d[2],v[3]+d[3])]then
-  local ax=axes[f];local plane=v[ax[1]]+(f%2==1 and 1 or 0);local k=f..':'..plane..':'..v[4]
-  local g=groups[k]or {f=f,plane=plane,color=v[4],cells={}};groups[k]=g;g.cells[v[ax[2]]..','..v[ax[3]]]={v[ax[2]],v[ax[3]]}
+  local ax=axes[f];local plane=(v[ax[1]]+(f%2==1 and 1 or 0))*2
+  for a=0,1 do for b=0,1 do
+   local u,w=v[ax[2]]*2+a,v[ax[3]]*2+b
+   local color=v[4]
+   if color>=2 and color<=5 then
+    local parity=(u+w)%2
+    local patch=hash(math.floor(u/4),math.floor(w/4),f)%11
+    if f==4 then
+     color=parity==0 and 1 or 2
+    elseif f==3 then
+     -- Broad light canopy, with checkerboard transitions into olive shadow.
+     if patch<3 then color=parity==0 and 3 or 4
+     elseif patch>8 then color=parity==0 and 4 or 5
+     else color=4 end
+    else
+     local py=ax[2]==2 and a or b
+     local lowEdge=not leafAt(v[1],v[2]-1,v[3])
+     local highEdge=not leafAt(v[1],v[2]+1,v[3])
+     local horizontal=ax[2]==2 and ax[3]or ax[2]
+     local hp=horizontal==ax[2]and a or b
+     local nx,ny,nz=v[1],v[2],v[3]
+     if horizontal==1 then nx=nx+(hp==0 and -1 or 1)
+     else nz=nz+(hp==0 and -1 or 1)end
+     local sideEdge=not leafAt(nx,ny,nz)
+     -- Broken stepped edge shadows join the lower canopy masses.
+     if (lowEdge and py==0)or(sideEdge and patch<7)then
+      color=(patch<5 or parity==0)and 1 or 2
+     elseif patch<3 then
+      color=parity==0 and 1 or 2
+     elseif patch<6 then
+      color=parity==0 and 2 or 3
+     elseif highEdge and py==1 then
+      color=parity==0 and 4 or 5
+     else color=3 end
+    end
+   end
+   local k=f..':'..plane..':'..color
+   local g=groups[k]or{f=f,plane=plane,color=color,cells={}}
+   groups[k]=g;g.cells[u..','..w]={u,w}
+  end end
  end end end
  local verts,indices={},{};local gkeys={};for k in pairs(groups)do gkeys[#gkeys+1]=k end;table.sort(gkeys)
  for _,gk in ipairs(gkeys)do local g=groups[gk];local keys={};for k in pairs(g.cells)do keys[#keys+1]=k end;table.sort(keys)
@@ -53,7 +97,7 @@ function M.geometry(ps)
    while true do local full=true;for j=0,w-1 do if not g.cells[(u+j)..','..(v+h)]then full=false;break end end;if not full then break end;h=h+1 end
    for y=v,v+h-1 do for x=u,u+w-1 do g.cells[x..','..y]=nil end end
    local ax=axes[g.f];local base,size={0,0,0},{0,0,0};base[ax[1]]=g.plane;base[ax[2]]=u;base[ax[3]]=v;size[ax[2]]=w;size[ax[3]]=h
-   local b=#verts;for _,c in ipairs(D.FACE_CORNERS[g.f])do verts[#verts+1]={(base[1]+c[1]*size[1])*2,(base[2]+c[2]*size[2])*2,(base[3]+c[3]*size[3])*2,(g.color-.5)/6,.5,D.FACE_SHADE[g.f]}end
+   local b=#verts;for _,c in ipairs(D.FACE_CORNERS[g.f])do verts[#verts+1]={base[1]+c[1]*size[1],base[2]+c[2]*size[2],base[3]+c[3]*size[3],(g.color-.5)/6,.5,D.FACE_SHADE[g.f]}end
    for _,i in ipairs({1,2,3,1,3,4})do indices[#indices+1]=b+i end
   end end
  end
@@ -77,8 +121,10 @@ local function prepare(map)
  local ps=M.placements(map);if #ps==0 then return end
  local ok,r=pcall(function()
   if not texture then
-   local colors={{.12,.18,.065},{.24,.31,.105},{.34,.41,.14},{.43,.48,.20},{.64,.57,.29},{.29,.23,.12}}
-   local data=love.image.newImageData(6,1);for i,c in ipairs(colors)do data:setPixel(i-1,0,c[1],c[2],c[3],1)end
+   local colors={{.12,.14,.09},{.24,.31,.105},{.34,.41,.14},{.43,.48,.20},{.55,.56,.28},{.29,.23,.12}}
+   -- Solid swatches: pixel shapes live in surface coordinates, never stretched UVs.
+   local data=love.image.newImageData(6,1)
+   for i,c in ipairs(colors)do data:setPixel(i-1,0,c[1],c[2],c[3],1)end
    texture=love.graphics.newImage(data);data:release();texture:setFilter('nearest','nearest')
   end
   local verts,indices=M.geometry(ps)
