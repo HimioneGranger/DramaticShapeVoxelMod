@@ -469,6 +469,11 @@ function Disk.fingerprint(map, slot, masks, kind)
     "row", tostring(tileset.tilesPerRow),
     "trueColor", tileset.trueColor and "1" or "0",
   }
+  -- PR51 changed shrub vertices/UVs; only Safari needs its meshes rebuilt.
+  if map.id=='SAFARI_ZONE_CENTER' or map.id=='SAFARI_ZONE_EAST'
+      or map.id=='SAFARI_ZONE_NORTH' or map.id=='SAFARI_ZONE_WEST' then
+    parts[#parts + 1] = "safari-canopy-source-shading-v1"
+  end
   -- Community visuals are real geometry/UV inputs. Keep each choice in the
   -- canonical fingerprint so a DEFAULT cache can never be reused for custom
   -- trees/fences/pillars (or vice versa), while every default remains the
