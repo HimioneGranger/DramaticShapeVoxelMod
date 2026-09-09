@@ -1,3 +1,12 @@
+# Safari ground coverage and cache refresh — 2026-09-08
+
+Complete olive treatment for flat grass tile94 and hedge/edge variants13,79,84–93.
+Only four outdoor Safari atlases change; non-green detail/alpha retained on edges.
+Native engine0.2.27 captured all four maps: 567 changed atlas pixels, all outside
+new coverage unchanged; tile94 matches tile0 exactly. No Quest validation.
+Map-scoped cache token prevents pre-PR51 shrub vertices from surviving the upgrade;
+non-Safari fingerprints unchanged. No global cache revision bump.
+
 # PR #51 merge verification â€” 2026-09-08
 
 Merged PR head `1e07e7f` into current master `22f5b03` in an isolated worktree.

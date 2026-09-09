@@ -979,12 +979,14 @@ local function safariGround(map,base,baked)
   -- The shared FOREST canopy uses the drawing anchored at 4 and edge tile 35.
   -- Recolor its green pixels only in this Safari-owned atlas; retain bark,
   -- source pixel detail and the original tree palette on every other map.
+  -- Hedge/edge variants retain their dark detail; tile 94 is flat grass.
   for _,tile in ipairs({0,48,32,52,55,57,72,73,74,80,81,82,83,95,
-    4,5,6,7,20,21,22,23,35,36,37,38,39,53,54})do
+    4,5,6,7,20,21,22,23,35,36,37,38,39,53,54,
+    13,79,84,85,86,87,88,89,90,91,92,93,94})do
    local sx,sy=tile%perRow*8,math.floor(tile/perRow)*8
    for y=0,7 do for x=0,7 do
     local rr,gg,bb,aa=data:getPixel(sx+x,sy+y)
-    if tile==0 or tile==48 then
+    if tile==0 or tile==48 or tile==94 then
      local hsh=(x*37+y*61+x*y*11)%97
      local c={.48,.50,.265}
      if hsh<12 then c={.53,.46,.29}elseif hsh>88 then c={.61,.57,.34}elseif hsh<23 then c={.40,.44,.235}end
