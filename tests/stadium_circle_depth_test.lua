@@ -52,6 +52,7 @@ local overworld = {
   end,
 }
 local modules = {
+  BattleCam = {}, -- camera-safe authored arenas are not selected by this fixture
   Mat4=assert(loadfile("lib/Mat4.lua"))(),
   UiBackplates={ arenaFill={get=function() return 'OFF' end},
     stadiumCircleScale=function() return circleScale end },

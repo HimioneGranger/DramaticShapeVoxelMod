@@ -12,6 +12,7 @@ local Images = V.require("BackdropImage")
 local Mat4 = V.require("Mat4")
 local Voxel3D = V.require("Voxel3D")
 local OverworldBattle = V.require("OverworldBattle")
+local BattleCam = V.require("BattleCam")
 
 local StadiumBackground = {}
 local installed = false
@@ -180,6 +181,12 @@ local function cavernBattle(ctx)
   return map and map.tileset and map.tileset.id == "CAVERN"
 end
 
+local function cameraSafeArena()
+  if UiBackplates.arenaFill:get() ~= "OFF" then return nil end
+  local arena = OverworldBattle.arena and OverworldBattle.arena() or nil
+  return arena and arena.cameraSafe and arena or nil
+end
+
 local function projectionAtFov(projection, fov)
   local out = copyArray(projection)
   local oldY = tonumber(out[6])
@@ -191,12 +198,21 @@ local function projectionAtFov(projection, fov)
   return out
 end
 
--- Cave-only stable composition for Stadium/Colosseum-hosted battles.
--- Ordinary Battle Art owns its own BattleCam and never enters this hook;
--- non-cave Stadium scenes immediately return the importer's original frame.
+-- Stable composition for geometry-dense Stadium/Colosseum-hosted battles.
+-- Cave arenas retain their raised over-the-shoulder correction. An authored
+-- camera-safe arena (currently Viridian Forest) instead receives Battle Art's
+-- canonical solved rig for the whole fight. This is intentionally applied in
+-- the provider camera hook, not only in BattleScene: Stadium's actors, stage,
+-- shadows and animation marks then all see the same fixed projection. Host
+-- send-out/attack cuts can no longer dive through a Legendary tree crown and
+-- make the ground or grass appear to pop out of existence.
 function StadiumBackground.camera(next, ctx)
   local frame = next(ctx)
-  if not cavernBattle(ctx) or type(frame) ~= "table" then return frame end
+  local safeArena = cameraSafeArena()
+  local cavern = cavernBattle(ctx)
+  if (not safeArena and not cavern) or type(frame) ~= "table" then
+    return frame
+  end
 
   local eye, focus, projection = frame.eye, frame.focus, frame.projection
   if not (type(eye) == "table" and type(focus) == "table"
@@ -206,29 +222,50 @@ function StadiumBackground.camera(next, ctx)
   local fx, fy, fz = tonumber(focus[1]), tonumber(focus[2]), tonumber(focus[3])
   if not (ex and ey and ez and fx and fy and fz) then return frame end
 
-  local arena = OverworldBattle.arena and OverworldBattle.arena() or nil
-  local lift = math.max(StadiumBackground.CAVE_BATTLE_MIN_LIFT, ey - fy)
-  -- Pull back with the lift instead of simply raising a short Stadium cut.
-  -- At 24 degrees the wall-clearing seat still reads as a battle camera, not
-  -- as the overhead diorama visible in TEST43.
-  local run = lift / math.tan(StadiumBackground.CAVE_BATTLE_ELEVATION)
-  local bearing = StadiumBackground.CAVE_BATTLE_BEARING
-  local correctedEye = {
-    fx + math.sin(bearing) * run,
-    fy + lift,
-    fz + math.cos(bearing) * run,
-  }
-  local fov = arena and arena.shape == "narrow"
-    and StadiumBackground.CAVE_NARROW_FOV
-    or StadiumBackground.CAVE_BATTLE_FOV
+  local correctedEye, correctedFocus, fov
+  if safeArena then
+    -- BattleCam returns world-map coordinates. Stadium's camera is local to
+    -- the arena origin; remove that translation here and providerRender will
+    -- add the chosen arena midpoint and ground height exactly once.
+    local solved = BattleCam.rig(safeArena, 0, true)
+    local mx, mz = safeArena.mid[1], safeArena.mid[2]
+    correctedEye = {
+      solved.eye[1] - mx,
+      solved.eye[2],
+      solved.eye[3] - mz,
+    }
+    correctedFocus = {
+      solved.focus[1] - mx,
+      solved.focus[2],
+      solved.focus[3] - mz,
+    }
+    fov = solved.fov
+  else
+    local arena = OverworldBattle.arena and OverworldBattle.arena() or nil
+    local lift = math.max(StadiumBackground.CAVE_BATTLE_MIN_LIFT, ey - fy)
+    -- Pull back with the lift instead of simply raising a short Stadium cut.
+    -- At 24 degrees the wall-clearing seat still reads as a battle camera, not
+    -- as the overhead diorama visible in TEST43.
+    local run = lift / math.tan(StadiumBackground.CAVE_BATTLE_ELEVATION)
+    local bearing = StadiumBackground.CAVE_BATTLE_BEARING
+    correctedEye = {
+      fx + math.sin(bearing) * run,
+      fy + lift,
+      fz + math.cos(bearing) * run,
+    }
+    correctedFocus = { fx, fy, fz }
+    fov = arena and arena.shape == "narrow"
+      and StadiumBackground.CAVE_NARROW_FOV
+      or StadiumBackground.CAVE_BATTLE_FOV
+  end
   local correctedProjection = projectionAtFov(projection, fov)
 
-  local correctedView = Mat4.lookAt(correctedEye, { fx, fy, fz }, { 0, 1, 0 })
+  local correctedView = Mat4.lookAt(correctedEye, correctedFocus, { 0, 1, 0 })
   local correctedVp = Mat4.mul(correctedProjection, correctedView)
   local out = {}
   for key, value in pairs(frame) do out[key] = value end
   out.eye = correctedEye
-  out.focus = { fx, fy, fz }
+  out.focus = correctedFocus
   out.view = correctedView
   out.projection = correctedProjection
   out.vp = correctedVp

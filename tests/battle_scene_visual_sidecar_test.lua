@@ -214,6 +214,16 @@ love = {
 
 local namespace = {}
 function namespace.require(name)
+  if name == 'CommunityVisuals' then return {
+    customForest = function() return false end, customTrees = function() return false end,
+  } end
+  if name == 'CavePerimeter' then return {draw = function() end} end
+  if name == 'WorldUnderlay' then return {
+    drawInterior = function() end, resolve = function() return nil end,
+  } end
+  if name == 'ForestAtmos' or name == 'ForestDressing' or name == 'Backdrop'
+      or name == 'SkyLayer' or name == 'CaveSconces' or name == 'TowerLobbyDetails'
+      or name == 'TowerGraveMist' or name == 'CaveAtmosphere3D' then return {} end
   return assert(({
     Pokeball = {},
     PokeballSettings = { active = function() return false end },

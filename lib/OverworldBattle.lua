@@ -586,7 +586,7 @@ function OverworldBattle.begin(state, battle)
   session = { state = state, arena = arena, battle = battle, shot = nil,
               armed = false, token = 0 }
   cullCast(state)
-  BattleCam.reset()
+  BattleCam.reset(arena)
   return true
 end
 

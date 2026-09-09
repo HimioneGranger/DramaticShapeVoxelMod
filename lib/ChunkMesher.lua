@@ -62,6 +62,7 @@ local Structures = V.require("Structures")
 local TileShape = V.require("TileShape")
 local Voxel3D = V.require("Voxel3D")
 local Budget = V.require("BuildBudget")
+local Timings = V.require("LoadTimings")
 local MeshDisk = V.require("VoxelMeshDisk")
 local CommunityVisuals = V.require("CommunityVisuals")
 
@@ -286,7 +287,11 @@ local TRI_ORDER = { 1, 2, 3, 1, 3, 4 }
 -- are emitted, then uploaded cooperatively just like the FFI path.
 local PACKED_VERTEX = "<" .. string.rep("f", 6 * 6)
 local PACKED_VERTEX_BYTES = 6 * 4
-local PACKED_QUADS_PER_CHUNK = 4096
+-- TEST93: keep terrain transfers well below TEST91's 4096-quad bursts without
+-- over-fragmenting first load. These 72 KiB packed chunks and 8192-vertex raw
+-- slices are independent of CommunityFlora's mature-tree mesh publication.
+local PACKED_QUADS_PER_CHUNK = 512
+local UPLOAD_VERTICES_PER_SLICE = 8192
 
 local function newPackedSink()
   local chunks, parts, values = {}, {}, {}
@@ -323,12 +328,13 @@ local function newPackedSink()
       if n == 0 then return nil end
       flush()
       local ok, mesh = pcall(function()
-        local result = love.graphics.newMesh(Voxel3D.FORMAT, n,
+        local result = Timings.call("mesh_alloc", love.graphics.newMesh,
+                                             Voxel3D.FORMAT, n,
                                              "triangles", "static")
         local first = 1
         for _, chunk in ipairs(chunks) do
           local data = love.data.newByteData(chunk)
-          result:setVertices(data, first)
+          Timings.call("mesh_write", result.setVertices, result, data, first)
           first = first + math.floor(#chunk / PACKED_VERTEX_BYTES)
           data:release()
           Budget.check()
@@ -383,16 +389,17 @@ local function newFfiSink()
       -- frame spike. The mesh is not cached (so never drawn) until the
       -- whole upload lands, and LuaJIT yields fine across pcall.
       local ok, mesh = pcall(function()
-        local m = love.graphics.newMesh(Voxel3D.FORMAT, n,
+        local m = Timings.call("mesh_alloc", love.graphics.newMesh,
+                                        Voxel3D.FORMAT, n,
                                         "triangles", "static")
-        local CHUNK = 65536              -- vertices per slice (~1.5MB)
+        local CHUNK = UPLOAD_VERTICES_PER_SLICE
         local i = 0
         while i < n do
           local count = math.min(CHUNK, n - i)
           local bytes = count * 6 * 4
           local data = love.data.newByteData(bytes)
           ffi.copy(data:getFFIPointer(), buf + i * 6, bytes)
-          m:setVertices(data, i + 1)
+          Timings.call("mesh_write", m.setVertices, m, data, i + 1)
           data:release()
           i = i + count
           Budget.check()
@@ -436,17 +443,18 @@ local function meshFromRaw(record)
   if not (record and record.n and record.n > 0) then return nil end
   if record.ptr and ffi then
     local ok, mesh = pcall(function()
-      local result = love.graphics.newMesh(Voxel3D.FORMAT, record.n,
+      local result = Timings.call("mesh_alloc", love.graphics.newMesh,
+                                           Voxel3D.FORMAT, record.n,
                                            "triangles", "static")
       local first = 0
       while first < record.n do
-        local count = math.min(65536, record.n - first)
+        local count = math.min(UPLOAD_VERTICES_PER_SLICE, record.n - first)
         local byteCount = count * PACKED_VERTEX_BYTES
         local data = love.data.newByteData(byteCount)
         ffi.copy(data:getFFIPointer(),
           ffi.cast("const uint8_t*", record.ptr)
             + first * PACKED_VERTEX_BYTES, byteCount)
-        result:setVertices(data, first + 1)
+        Timings.call("mesh_write", result.setVertices, result, data, first + 1)
         data:release()
         first = first + count
         Budget.check()
@@ -457,20 +465,33 @@ local function meshFromRaw(record)
   end
   if not record.chunks then return nil end
   local ok, mesh = pcall(function()
-    local result = love.graphics.newMesh(Voxel3D.FORMAT, record.n,
+    local result = Timings.call("mesh_alloc", love.graphics.newMesh,
+                                         Voxel3D.FORMAT, record.n,
                                          "triangles", "static")
     local first, carry = 1, ""
+    local sliceBytes = UPLOAD_VERTICES_PER_SLICE * PACKED_VERTEX_BYTES
     for _, chunk in ipairs(record.chunks) do
       local bytes = carry .. chunk
-      local usable = math.floor(#bytes / PACKED_VERTEX_BYTES)
-                     * PACKED_VERTEX_BYTES
-      carry = bytes:sub(usable + 1)
-      if usable > 0 then
-        local data = love.data.newByteData(bytes:sub(1, usable))
-        result:setVertices(data, first)
-        first = first + usable / PACKED_VERTEX_BYTES
+      local offset = 1
+      while #bytes - offset + 1 >= sliceBytes do
+        local data = love.data.newByteData(
+          bytes:sub(offset, offset + sliceBytes - 1))
+        Timings.call("mesh_write", result.setVertices, result, data, first)
+        first = first + UPLOAD_VERTICES_PER_SLICE
         data:release()
+        offset = offset + sliceBytes
+        Budget.check()
       end
+      carry = bytes:sub(offset)
+    end
+    local usable = math.floor(#carry / PACKED_VERTEX_BYTES)
+                   * PACKED_VERTEX_BYTES
+    if usable > 0 then
+      local data = love.data.newByteData(carry:sub(1, usable))
+      Timings.call("mesh_write", result.setVertices, result, data, first)
+      first = first + usable / PACKED_VERTEX_BYTES
+      data:release()
+      carry = carry:sub(usable + 1)
       Budget.check()
     end
     if #carry ~= 0 or first ~= record.n + 1 then
@@ -532,10 +553,149 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   local push = sink.push
   local waterPush = waterSink and waterSink.push or nil
   local tileset = map.tileset
+  local viridianForest = CommunityVisuals.customForest()
+    and tileset.id == "FOREST"
+    and tostring(map.id or "") == "VIRIDIAN_FOREST"
+  -- TEST113 treats Lavender as a location identity, not an option-dependent
+  -- material tweak. TEST111 could silently miss the pass whenever the grass
+  -- and road controls were left on their Battle Art defaults.
+  local lavenderGround = tileset.id == "OVERWORLD"
+    and tostring(map.id or ""):upper() == "LAVENDER_TOWN"
+  local towerInterior = tileset.id == "CEMETERY"
+    and tostring(map.id or ""):upper():match("^POKEMON_TOWER_[1-7]F$") ~= nil
+    and CommunityVisuals.customTower()
   local S = Structures.forMap(map)
   local perRow = tileset.tilesPerRow or 16
-  local atlasW = tileset.imageWidth or (perRow * 8)
-  local atlasH = tileset.imageHeight or 48
+  local sourceAtlasW = tileset.imageWidth or (perRow * 8)
+  local sourceAtlasH = tileset.imageHeight or 48
+  local TOWER_WALL_SIZE = 2048
+  local TOWER_COUNTER_SIZE = 1024
+  local TOWER_FLOOR_SIZE = 2048
+  local TOWER_DETAIL_SIZE = 1024
+  local TOWER_WALL_REGION_X = sourceAtlasW
+  local TOWER_WALL_REGION_Y = 0
+  local TOWER_COUNTER_REGION_X = TOWER_WALL_REGION_X + TOWER_WALL_SIZE
+  local TOWER_COUNTER_REGION_Y = 0
+  local TOWER_FLOOR_REGION_X = sourceAtlasW
+  local TOWER_FLOOR_REGION_Y = TOWER_WALL_SIZE
+  local TOWER_STAIR_REGION_X = TOWER_COUNTER_REGION_X
+  local TOWER_STAIR_REGION_Y = TOWER_COUNTER_SIZE
+  local TOWER_GRAVE_REGION_X = TOWER_COUNTER_REGION_X
+  local TOWER_GRAVE_REGION_Y = TOWER_WALL_SIZE
+  local TOWER_COUNTER_TOP_REGION_X = TOWER_COUNTER_REGION_X
+  local TOWER_COUNTER_TOP_REGION_Y = 3072
+  local TOWER_MAP_MARGIN = RING * 4 * 8
+  local towerWorldW = ((map.def and map.def.width) or 1) * 4 * 8
+  local towerWorldH = ((map.def and map.def.height) or 1) * 4 * 8
+  local towerWallSpan = math.max(towerWorldW, towerWorldH)
+    + TOWER_MAP_MARGIN * 2
+  -- TerrainAtlas packs TEST124's independent 2048px wall, approved 1024px
+  -- counter and 2048px floor materials only on Tower maps. Wall and counter
+  -- occupy the first material row; floor sits directly below wall. This keeps
+  -- the finished atlas inside a conservative 4096px mobile-GPU edge while all
+  -- legacy tiles remain at their original coordinates.
+  local atlasW = towerInterior and
+    (sourceAtlasW + TOWER_WALL_SIZE + TOWER_COUNTER_SIZE)
+    or sourceAtlasW
+  local atlasH = towerInterior and
+    math.max(sourceAtlasH, TOWER_WALL_SIZE + TOWER_FLOOR_SIZE)
+    or sourceAtlasH
+
+  -- Give the counter its own full material range. TEST122 projected the whole
+  -- room across this small L, so its few occupied texels looked soft even with
+  -- a good source image. Bounds are visual only; collision and placement stay
+  -- on the authored counter cells.
+  local counterMinX, counterMinZ, counterMaxX, counterMaxZ
+  if towerInterior then
+    local tilesW = ((map.def and map.def.width) or 1) * 4
+    local tilesH = ((map.def and map.def.height) or 1) * 4
+    for cty = 0, tilesH - 1 do
+      for ctx = 0, tilesW - 1 do
+        local ck = keyOf(ctx, cty)
+        local cs = S.shapeAt[ck]
+        if cs and cs.class == "counter" and not S.skip[ck] then
+          local cx0, cz0 = ctx * 8, cty * 8
+          counterMinX = counterMinX and math.min(counterMinX, cx0) or cx0
+          counterMinZ = counterMinZ and math.min(counterMinZ, cz0) or cz0
+          counterMaxX = counterMaxX and math.max(counterMaxX, cx0 + 8) or (cx0 + 8)
+          counterMaxZ = counterMaxZ and math.max(counterMaxZ, cz0 + 8) or (cz0 + 8)
+        end
+      end
+    end
+  end
+  counterMinX, counterMinZ = counterMinX or 0, counterMinZ or 0
+  counterMaxX, counterMaxZ = counterMaxX or 8, counterMaxZ or 8
+  local counterSpanX = math.max(8, counterMaxX - counterMinX)
+  local counterSpanZ = math.max(8, counterMaxZ - counterMinZ)
+
+  local function towerMaterialUV(regionX, regionY, regionSize, fu, fv)
+    fu = math.max(0, math.min(1, fu))
+    fv = math.max(0, math.min(1, fv))
+    local px = 0.5 + fu * (regionSize - 1)
+    local py = 0.5 + fv * (regionSize - 1)
+    return { (regionX + px) / atlasW, (regionY + py) / atlasH }
+  end
+
+  local function towerGraniteWallUV(axis, y)
+    -- TEST121's fixed 256px range ended before the room did. Coordinates past
+    -- it clamped to one texel and became the long horizontal stripes visible in
+    -- the supplied screenshots. Normalize against this map's complete body and
+    -- render ring, so no wall or rib can ever sample a stretched edge.
+    return towerMaterialUV(TOWER_WALL_REGION_X, TOWER_WALL_REGION_Y,
+      TOWER_WALL_SIZE,
+      (axis + TOWER_MAP_MARGIN) / towerWallSpan,
+      (y + 8) / 80)
+  end
+
+  local function towerGranitePlanUV(x, z)
+    return towerMaterialUV(TOWER_WALL_REGION_X, TOWER_WALL_REGION_Y,
+      TOWER_WALL_SIZE,
+      (x + TOWER_MAP_MARGIN) / (towerWorldW + TOWER_MAP_MARGIN * 2),
+      (z + TOWER_MAP_MARGIN) / (towerWorldH + TOWER_MAP_MARGIN * 2))
+  end
+
+  local function towerFloorUV(x, z)
+    -- The floor owns a second, low-contrast honed-stone sheet. One mapping
+    -- covers the whole room and border ring without repeats or edge clamping.
+    return towerMaterialUV(TOWER_FLOOR_REGION_X, TOWER_FLOOR_REGION_Y,
+      TOWER_FLOOR_SIZE,
+      (x + TOWER_MAP_MARGIN) / (towerWorldW + TOWER_MAP_MARGIN * 2),
+      (z + TOWER_MAP_MARGIN) / (towerWorldH + TOWER_MAP_MARGIN * 2))
+  end
+
+  local function towerCounterPlanUV(x, z)
+    return towerMaterialUV(TOWER_COUNTER_TOP_REGION_X, TOWER_COUNTER_TOP_REGION_Y,
+      TOWER_COUNTER_SIZE,
+      (x - counterMinX) / counterSpanX,
+      (z - counterMinZ) / counterSpanZ)
+  end
+
+  local function towerCounterSideUV(d, axis, y)
+    local horizontal = (d == 5 or d == 6)
+      and ((axis - counterMinX) / counterSpanX)
+      or ((axis - counterMinZ) / counterSpanZ)
+    return towerMaterialUV(TOWER_COUNTER_REGION_X, TOWER_COUNTER_REGION_Y,
+      TOWER_COUNTER_SIZE,
+      horizontal, 0.08 + (y / 8) * 0.84)
+  end
+
+  local function towerDetailUV(kind, c, q)
+    local rx = kind == "stair" and TOWER_STAIR_REGION_X or TOWER_GRAVE_REGION_X
+    local ry = kind == "stair" and TOWER_STAIR_REGION_Y or TOWER_GRAVE_REGION_Y
+    local yFlat = math.abs(q[1][2] - q[2][2]) < .0001
+      and math.abs(q[1][2] - q[3][2]) < .0001
+    local xFlat = math.abs(q[1][1] - q[2][1]) < .0001
+      and math.abs(q[1][1] - q[3][1]) < .0001
+    local u, v
+    if yFlat then
+      u, v = (c[1] % 16) / 16, (c[3] % 16) / 16
+    elseif xFlat then
+      u, v = (c[3] % 16) / 16, 1 - math.max(0, math.min(16, c[2])) / 16
+    else
+      u, v = (c[1] % 16) / 16, 1 - math.max(0, math.min(16, c[2])) / 16
+    end
+    return towerMaterialUV(rx, ry, TOWER_DETAIL_SIZE, u, v)
+  end
 
   local function heightAt(tx, ty)
     local k = keyOf(tx, ty)
@@ -712,6 +872,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     body = { 2, 0 }, light = { 3, 0 },
   }
   local CAVE_MOONSTONE_SWATCH_TILE = 2
+  local TOWER_GRANITE_SWATCH_TILE = 17
 
   -- TEST403 Kanto retaining walls.  The cliff-mound family reuses tile 17
   -- for its broad body and the authored 2/36 corner-and-side pair.  Those
@@ -851,12 +1012,58 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     return n / 104729
   end
 
+  local function forestNoise(a, b, salt)
+    local n = (a * 73856093 + b * 19349663 + salt * 83492791) % 104729
+    if n < 0 then n = n + 104729 end
+    n = (n * n * 37 + n * 17 + salt * 101) % 104729
+    return n / 104729
+  end
+
+  -- Rotate and crop the four related forest-floor donors by stable world
+  -- position, then apply a subtle continuous broad tone. This removes the
+  -- repeated 8px dot grid without introducing a second floor pass.
+  local function forestGroundTop(tx, ty, x0, z0, h, tile, shade)
+    local u0, u1, v0, v1 = uvRect(tile, 0, 8)
+    local turn = math.floor(forestNoise(tx, ty, 397) * 8)
+    local sample = math.floor(forestNoise(tx, ty, 409) * 5)
+    local span = sample == 0 and 1 or 0.62
+    local offU = (sample == 2 or sample == 4) and 0.38 or 0
+    local offV = (sample == 3 or sample == 4) and 0.38 or 0
+    local mirror, rot = turn >= 4, turn % 4
+    local uv = {}
+    for i = 1, 4 do
+      local du = (i == 2 or i == 3) and 1 or 0
+      local dv = (i >= 3) and 1 or 0
+      if mirror then du = 1 - du end
+      if rot == 1 then
+        du, dv = 1 - dv, du
+      elseif rot == 2 then
+        du, dv = 1 - du, 1 - dv
+      elseif rot == 3 then
+        du, dv = dv, 1 - du
+      end
+      du, dv = offU + du * span, offV + dv * span
+      uv[i] = { u0 + (u1 - u0) * du, v0 + (v1 - v0) * dv }
+    end
+    local c = { { x0, h, z0 }, { x0 + 8, h, z0 },
+                { x0 + 8, h, z0 + 8 }, { x0, h, z0 + 8 } }
+    local lit = aoShades(tx, ty, h, shade)
+    local perCorner, varied = type(lit) == "table", {}
+    for i = 1, 4 do
+      local gx, gz = c[i][1] / 8, c[i][3] / 8
+      local tone = 0.955 + math.sin(gx * 0.24 + gz * 0.13) * 0.035
+                         + math.sin(gx * 0.09 - gz * 0.21) * 0.025
+      varied[i] = (perCorner and lit[i] or lit) * tone
+    end
+    push(c, uv, varied)
+  end
+
   -- TEST36 warm cave materials. Ordinary top surfaces use solid atlas donors;
   -- all visible variation comes from broad cached geometry and low-frequency
   -- vertex tone. This prevents the old eight-pixel specks from repeating into
   -- confetti while keeping the cap visibly separate from the brick faces.
   local CAVE_PATTERN_TILES = {
-    earth = { 32, 33, 42 },
+    dirt = { 32, 33, 42 },
     shelf = { 5, 41 },
     -- Tile 2 is reserved for solid-colour geometry swatches. Keeping it out
     -- of visible top faces prevents its D/S/B/L sample row from reading as
@@ -872,9 +1079,10 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   local CAVE_INNER_WALL_SCALE = 1.875
 
   local function caveSurfaceKind(s, tile)
-    if tileset.id ~= "CAVERN" or not s then return nil end
+    if tileset.id ~= "CAVERN" or not s
+       or not CommunityVisuals.customCaves() then return nil end
     if s.class == "ground" and not CAVE_SPECIAL_GROUND[tile] then
-      return "earth"
+      return "dirt"
     end
     if s.class == "ledge" and not CAVE_STAIR_PLATE[tile] then
       return "shelf"
@@ -888,7 +1096,8 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   -- plane and making characters look submerged. Every ledge now keeps its
   -- source height; CavePerimeter still owns the untouched outer enclosure.
   local function caveRenderHeight(s, tile, h)
-    if tileset.id == "CAVERN" and h > 0 and s and s.class == "wall" then
+    if CommunityVisuals.customCaves() and tileset.id == "CAVERN"
+       and h > 0 and s and s.class == "wall" then
       return h * CAVE_INNER_WALL_SCALE
     end
     return h
@@ -1060,13 +1269,10 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     return (north + (south - north) * fz) * tone
   end
 
-  -- TEST36 broad weathered cave caps. The warm TEST25/26 brick sides return,
-  -- but their old clustered eight-pixel top art does not: on a large cave map
-  -- those repeated dots read as confetti. Each cached facet spans roughly
-  -- three source tiles, has no grout or outline, and receives only a restrained
-  -- five-percent tone step. The result is rough earthen bedrock rather than a
-  -- polished patio or a field of tiny marks.
-  local CAVE_GROUND_FACET_CELL = 24
+  -- TEST60 keeps TEST59's connected bedrock language but gives the floor a
+  -- calmer supporting role. Broader facets cut floor mesh work substantially,
+  -- while restrained relief and contrast preserve a natural cave surface.
+  local CAVE_GROUND_FACET_CELL = 15
 
   local function caveSmoothNoise(x, z, salt)
     local scale = 44
@@ -1083,29 +1289,71 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     return nx0 + (nx1 - nx0) * fz
   end
 
+  -- Pokemon Tower wall caps use the 2048px reference granite, the counter top
+  -- uses its own calm pearl-quartz sheet while its body keeps the approved
+  -- TEST123 dark granite, and ordinary ground owns a 2048px polished floor.
+  local function towerGraniteTop(tx, ty, x0, z0, h, shade, tile, material)
+    local lit = aoShades(tx, ty, h, shade)
+    local tone = material == "counter" and 1.06
+      or material == "wall" and 1.18
+      -- The 5F healing zone remains readable as a restrained pale-stone
+      -- inlay. Sampling its original Cemetery tile made the staged battle
+      -- camera expose vivid blue strips between graves and fog banks.
+      or material == "healing" and 1.04 or 0.91
+    local uvAt = material == "counter" and towerCounterPlanUV
+      or material == "wall" and towerGranitePlanUV or towerFloorUV
+    local c = { { x0, h, z0 }, { x0 + 8, h, z0 },
+                { x0 + 8, h, z0 + 8 }, { x0, h, z0 + 8 } }
+    push(c, { uvAt(x0, z0),
+              uvAt(x0 + 8, z0),
+              uvAt(x0 + 8, z0 + 8),
+              uvAt(x0, z0 + 8) },
+         { cavePointShade(lit, x0, z0, x0, z0, tone),
+           cavePointShade(lit, x0 + 8, z0, x0, z0, tone),
+           cavePointShade(lit, x0 + 8, z0 + 8, x0, z0, tone),
+           cavePointShade(lit, x0, z0 + 8, x0, z0, tone) })
+  end
+
   -- TEST37 very broad geological ridges. This is evaluated into the cached
   -- top mesh itself: there is no decal, coplanar strip or live-light layer to
   -- shimmer. Two soft ridges occur across roughly every hundred world pixels,
   -- and low-frequency warp keeps them from reading as manufactured grooves.
   local function caveRidgeField(x, z, salt)
-    local warp = (caveSmoothNoise(x * 0.63, z * 0.63, salt + 131) - 0.5) * 1.5
-    local wave = math.abs(math.sin((x * 0.60 + z * 0.36) / 12 + warp))
-    local ridge = math.max(0, (wave - 0.76) / 0.24)
+    local warp = (caveSmoothNoise(x * 0.63, z * 0.63, salt + 131) - 0.5) * 4.8
+    local wave = math.abs(math.sin((x * 0.60 + z * 0.36) / 8.2 + warp))
+    local ridge = math.max(0, (wave - 0.61) / 0.39)
     return ridge * ridge
+  end
+
+  local function caveFloorField(x, z, salt)
+    local macro = caveSmoothNoise(x * 0.94, z * 0.94, salt + 149)
+    local ridge = caveRidgeField(x, z, salt)
+    local warp = (caveSmoothNoise(x * 0.72, z * 0.69,
+                                  salt + 157) - 0.5) * 7.5
+    local cragWave = math.abs(math.sin(x / 5.8 - z / 8.7 + warp))
+    local crag = math.max(0, (cragWave - 0.58) / 0.42)
+    crag = crag * crag
+    local splitWave = math.abs(math.sin(x / 6.9 + z / 10.8
+      + (caveSmoothNoise(x * 1.11, z * 1.03, salt + 163) - 0.5) * 2.8))
+    local fissure = math.max(0, (splitWave - 0.80) / 0.20)
+    fissure = fissure * fissure
+    return macro, ridge, crag, fissure
   end
 
   local function caveGroundVertex(gx, gz, h, salt)
     local cell = CAVE_GROUND_FACET_CELL
-    local jitter = cell * 0.32
+    local jitter = cell * 0.31
     local x = gx * cell
       + (rockNoise(gx, gz, salt + 11) - 0.5) * jitter
     local z = gz * cell
       + (rockNoise(gx, gz, salt + 21) - 0.5) * jitter
+    local macro, ridge, crag, fissure = caveFloorField(x, z, salt)
     return {
       x,
       z,
-      h + (rockNoise(gx, gz, salt + 27) - 0.5) * 0.80
-        + caveRidgeField(x, z, salt) * 0.18,
+      h + (macro - 0.5) * 0.60
+        + (rockNoise(gx, gz, salt + 27) - 0.5) * 0.30
+        + ridge * 0.25 + crag * 0.15 - fissure * 0.12,
     }
   end
 
@@ -1123,16 +1371,17 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     local function emitFacet(facet, gx, gz, half)
       local poly = caveClipFacetTile(facet, x0, z0, x1, z1)
       if #poly < 3 then return end
-      -- One calm material swatch plus a broad, low-contrast facet tone. There
-      -- is deliberately no dark joint bed or inset edge around the facet.
+      -- One calm material swatch plus broad geological shading. Dark changes
+      -- follow valleys and ridges in the actual mesh rather than drawn marks.
       local uv = caveSolidUV(donors[1])
-      local facetTone = 0.95
-        + rockNoise(gx * 2 + half, gz, salt + 83) * 0.10
+      local facetTone = 0.82
+        + rockNoise(gx * 2 + half, gz, salt + 83) * 0.26
       local function point(p) return { p[1], p[3], p[2] } end
       local function pointShade(p)
-        local tone = facetTone
-          * (0.98 + caveSmoothNoise(p[1], p[2], salt + 61) * 0.04)
-          * (1.00 + caveRidgeField(p[1], p[2], salt) * 0.025)
+        local macro, ridge, crag, fissure = caveFloorField(p[1], p[2], salt)
+        local tone = facetTone * (0.84 + macro * 0.18
+          + ridge * 0.09 + crag * 0.05 - fissure * 0.14)
+        tone = math.max(0.62, math.min(1.14, tone))
         return cavePointShade(lit, p[1], p[2], x0, z0, tone)
       end
       if #poly == 4 then
@@ -1169,8 +1418,50 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     end
   end
 
+  -- TEST62 walkable cave ground is plain granular dirt, not designed rock.
+  -- One flat-shaded quad per source tile removes every diagonal lighting
+  -- triangle. Three dense, low-contrast grain donors are rotated in world
+  -- space for abundant dirt speckles without adding a single geometry piece.
+  local function caveDirtTop(tx, ty, x0, z0, h, shade)
+    local x1, z1 = x0 + 8, z0 + 8
+    local lit = aoShades(tx, ty, h, shade)
+    local donors = CAVE_PATTERN_TILES.dirt
+    local pick = math.min(#donors, math.floor(
+      rockNoise(tx, ty, 1181) * #donors) + 1)
+    local u0, u1, v0, v1 = uvRect(donors[pick], 0, 8)
+    local uvCorners = {
+      { u0, v0 }, { u1, v0 }, { u1, v1 }, { u0, v1 },
+    }
+    local rotation = math.floor(rockNoise(tx, ty, 1193) * 4)
+    local uvs = {}
+    for i = 1, 4 do
+      uvs[i] = uvCorners[((i + rotation - 1) % 4) + 1]
+    end
+
+    -- Average ambient occlusion across the tile so the floor can darken near
+    -- walls without producing a diagonal gradient inside either GPU triangle.
+    local flat = lit
+    if type(lit) == "table" then
+      flat = (lit[1] + lit[2] + lit[3] + lit[4]) * 0.25
+    end
+    -- TEST65 keeps the approved grain exactly intact but stops the cave's
+    -- warm light from blowing the path out to bright orange.
+    flat = flat * (0.88 + rockNoise(tx, ty, 1201) * 0.04)
+
+    push({ { x0, h, z0 }, { x1, h, z0 },
+           { x1, h, z1 }, { x0, h, z1 } },
+         uvs, { flat, flat, flat, flat })
+  end
+
   local function caveNaturalTop(tx, ty, x0, z0, h, shade, kind)
-    caveContinuousSurface(tx, ty, x0, z0, h, shade, kind)
+    -- TEST64: the bright raised CAVERN `shelf` is also a walkable corridor,
+    -- not a rock cap. Route both floor datums through dirt; stair plates and
+    -- true wall tops are classified separately and retain their authored art.
+    if kind == "dirt" or kind == "shelf" then
+      caveDirtTop(tx, ty, x0, z0, h, shade)
+    else
+      caveContinuousSurface(tx, ty, x0, z0, h, shade, kind)
+    end
   end
 
   -- Shared boundaries for a staggered world-space stone field.  The old
@@ -1397,6 +1688,39 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
            { x1, h, z1 }, { x0, h, z1 } },
          pavedUV(KANTO_GRASS_TILE, variant),
          grassShades(x0, z0, shade))
+  end
+
+  local function isLavenderGroundTile(tile)
+    return tile == KANTO_GRASS_TILE or KANTO_PATH_TILE[tile] == true
+  end
+
+  local function lavenderGroundShades(x0, z0, shade)
+    local corners = {
+      { x0, z0 }, { x0 + 8, z0 },
+      { x0 + 8, z0 + 8 }, { x0, z0 + 8 },
+    }
+    local out = {}
+    for i, corner in ipairs(corners) do
+      local base = type(shade) == "table" and shade[i] or shade
+      -- Two slow fields cross source-tile boundaries, so variation reads as
+      -- worn earth instead of revealing the original eight-pixel grid.
+      local broad = smoothPathNoise(corner[1] * 0.70, corner[2] * 0.70, 1111)
+      local drift = smoothPathNoise(corner[1] * 0.36, corner[2] * 0.36, 1117)
+      out[i] = base * (0.955 + broad * 0.055 + drift * 0.025)
+    end
+    return out
+  end
+
+  -- TEST111: Lavender's authored path/turf alternation is retained in map
+  -- data but presented as one continuous, low-contrast earth plane. One
+  -- quad per cell preserves the existing collision and draw-call profile.
+  local function lavenderGroundTop(tx, ty, x0, z0, h, shade)
+    local x1, z1 = x0 + 8, z0 + 8
+    local variant = math.floor(rockNoise(tx, ty, 1111) * 4)
+    push({ { x0, h, z0 }, { x1, h, z0 },
+           { x1, h, z1 }, { x0, h, z1 } },
+         pavedUV(KANTO_PATH_SWATCH_TILE, variant),
+         lavenderGroundShades(x0, z0, shade))
   end
 
   local function woodRect(axis, across0, across1, along0, along1, y)
@@ -1706,34 +2030,252 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     end
   end
 
-  -- TEST35 continuous natural cave faces. TEST34 still used stacked inset
-  -- moonstone blocks on every exposed maze wall, completing the rich-patio
-  -- illusion even after ordinary ground stopped using joints. This surface is
-  -- one connected, irregular low-poly rock skin: no courses, grout, individual
-  -- blocks or bevel strips. Its shared world-space vertices cross both the
-  -- hidden 8px tile cuts and the mesher's vertical bands without seams.
+  -- TEST124 Pokemon Tower. The wall is continuous reference-matched granite,
+  -- not masonry or horizontal banding: irregular diagonal smoky slabs sit
+  -- behind tall pale monolithic ribs. Fronts remain coplanar and receive a
+  -- gentle value lift toward the open ceiling rather than a repeated baked
+  -- white strip in the texture.
+  local function towerGraniteSide(d, x0, z0, y0, y1, shade)
+    local axis0 = (d == 5 or d == 6) and x0 or z0
+    local axis1 = axis0 + 8
+    local uvDark = rockUV(TOWER_GRANITE_SWATCH_TILE, ROCK_TEXEL.dark)
+    local uvShadow = rockUV(TOWER_GRANITE_SWATCH_TILE, ROCK_TEXEL.shadow)
+    local uvBody = rockUV(TOWER_GRANITE_SWATCH_TILE, ROCK_TEXEL.body)
+    local uvLight = rockUV(TOWER_GRANITE_SWATCH_TILE, ROCK_TEXEL.light)
+
+    -- Dark stone behind the relief prevents cracks from revealing the void.
+    sideSolid({ faceAxisPoint(d, x0, z0, axis0, y0, -0.18),
+                faceAxisPoint(d, x0, z0, axis1, y0, -0.18),
+                faceAxisPoint(d, x0, z0, axis1, y1, -0.18),
+                faceAxisPoint(d, x0, z0, axis0, y1, -0.18) },
+              uvShadow, shade, 0.78, d, x0, z0, y0, y1)
+
+    local function upperWallLift(y)
+      local t = math.max(0, math.min(1, (y - 36) / 28))
+      t = t * t * (3 - 2 * t)
+      return 1 + t * 0.30
+    end
+
+    local function shadeAt(axis, y, tone)
+      local lift = upperWallLift(y)
+      if type(shade) ~= "table" then return shade * tone * lift end
+      local fx = math.max(0, math.min(1, (axis - axis0) / 8))
+      local fy = math.max(0, math.min(1,
+        (y - y0) / math.max(0.001, y1 - y0)))
+      local bottom = shade[1] + (shade[2] - shade[1]) * fx
+      local top = shade[4] + (shade[3] - shade[4]) * fx
+      return (bottom + (top - bottom) * fy) * tone * lift
+    end
+
+    local function texturedFront(sx, ex, sy, ey, depth, _, baseTone)
+      local fbl = faceAxisPoint(d, x0, z0, sx, sy, depth)
+      local fbr = faceAxisPoint(d, x0, z0, ex, sy, depth)
+      local ftr = faceAxisPoint(d, x0, z0, ex, ey, depth)
+      local ftl = faceAxisPoint(d, x0, z0, sx, ey, depth)
+      push({ fbl, fbr, ftr, ftl },
+           { towerGraniteWallUV(sx, sy), towerGraniteWallUV(ex, sy),
+             towerGraniteWallUV(ex, ey), towerGraniteWallUV(sx, ey) },
+           { shadeAt(sx, sy, baseTone), shadeAt(ex, sy, baseTone),
+             shadeAt(ex, ey, baseTone), shadeAt(sx, ey, baseTone) })
+    end
+
+    -- One uninterrupted material panel per authored wall face.  No internal
+    -- edges, colour squares, relief noise, or changing normals remain.
+    texturedFront(axis0, axis1, y0, y1, 0.24, nil, 0.88)
+
+    local function projectedPanel(ax0, ax1, ay0, ay1,
+                                  depth, back, uv, tone)
+      local sx, ex = math.max(axis0, ax0), math.min(axis1, ax1)
+      local sy, ey = math.max(y0, ay0), math.min(y1, ay1)
+      if ex <= sx or ey <= sy then return end
+      local bbl = faceAxisPoint(d, x0, z0, sx, sy, back)
+      local bbr = faceAxisPoint(d, x0, z0, ex, sy, back)
+      local btr = faceAxisPoint(d, x0, z0, ex, ey, back)
+      local btl = faceAxisPoint(d, x0, z0, sx, ey, back)
+      local fbl = faceAxisPoint(d, x0, z0, sx, sy, depth)
+      local fbr = faceAxisPoint(d, x0, z0, ex, sy, depth)
+      local ftr = faceAxisPoint(d, x0, z0, ex, ey, depth)
+      local ftl = faceAxisPoint(d, x0, z0, sx, ey, depth)
+      texturedFront(sx, ex, sy, ey, depth, uv, tone, 151)
+      sideSolid({ btl, btr, ftr, ftl }, uvLight, shade, tone * 0.95,
+                d, x0, z0, y0, y1)
+      sideSolid({ bbr, bbl, fbl, fbr }, uvShadow, shade, tone * 0.82,
+                d, x0, z0, y0, y1)
+    end
+
+    -- Low plinth and pale crown are the same stone family, separated through
+    -- restrained value and depth rather than a manufactured panel texture.
+    projectedPanel(axis0, axis1, 0.0, 2.0, 0.92, 0.46,
+                   uvShadow, 1.00)
+    projectedPanel(axis0, axis1, 61.4, 64.0, 1.12, 0.46,
+                   uvLight, 1.16)
+
+    -- Tall rectangular stone ribs. In the reference they are pale but still
+    -- part of the wall, so their projection and value contrast stay modest.
+    local spacing, half = 32, 3.25
+    local first = math.ceil((axis0 - half - 0.8) / spacing)
+    local last = math.floor((axis1 + half + 0.8) / spacing)
+    for i = first, last do
+      local center = i * spacing
+      local rawS, rawE = center - half, center + half
+      local sx, ex = math.max(axis0, rawS), math.min(axis1, rawE)
+      if ex > sx then
+        -- Rib rear remains beyond the wall's maximum 0.34 relief, preventing
+        -- z-fighting while preserving the flatter silhouette of the source.
+        local back, depth = 0.46, 1.48
+        local bbl = faceAxisPoint(d, x0, z0, sx, y0, back)
+        local bbr = faceAxisPoint(d, x0, z0, ex, y0, back)
+        local btr = faceAxisPoint(d, x0, z0, ex, y1, back)
+        local btl = faceAxisPoint(d, x0, z0, sx, y1, back)
+        local fbl = faceAxisPoint(d, x0, z0, sx, y0, depth)
+        local fbr = faceAxisPoint(d, x0, z0, ex, y0, depth)
+        local ftr = faceAxisPoint(d, x0, z0, ex, y1, depth)
+        local ftl = faceAxisPoint(d, x0, z0, sx, y1, depth)
+        texturedFront(sx, ex, y0, y1, depth, uvLight, 1.20)
+        if rawS >= axis0 - 0.001 then
+          sideSolid({ bbl, btl, ftl, fbl }, uvShadow, shade, 0.87,
+                    d, x0, z0, y0, y1)
+        end
+        if rawE <= axis1 + 0.001 then
+          sideSolid({ btr, bbr, fbr, ftr }, uvBody, shade, 0.88,
+                    d, x0, z0, y0, y1)
+        end
+      end
+
+      projectedPanel(center - half - 0.75, center + half + 0.75,
+                     0.0, 4.3, 1.78, 0.46, uvBody, 1.22)
+      projectedPanel(center - half - 0.85, center + half + 0.85,
+                     58.7, 64.0, 1.88, 0.46, uvLight, 1.23)
+    end
+  end
+
+  -- The reception counter uses the same real slab material as the room. A
+  -- recessed body and projecting polished upper band stop the old eight-pixel
+  -- furniture art from reading as a stretched wooden box.
+  local function towerGraniteCounterSide(d, x0, z0, y0, y1, shade)
+    local axis0 = (d == 5 or d == 6) and x0 or z0
+    local axis1 = axis0 + 8
+    local function counterShade(axis, y, tone)
+      if type(shade) ~= "table" then return shade * tone end
+      local fx = math.max(0, math.min(1, (axis - axis0) / 8))
+      local fy = math.max(0, math.min(1,
+        (y - y0) / math.max(0.001, y1 - y0)))
+      local bottom = shade[1] + (shade[2] - shade[1]) * fx
+      local top = shade[4] + (shade[3] - shade[4]) * fx
+      return (bottom + (top - bottom) * fy) * tone
+    end
+    local function counterUV(axis, y)
+      return towerCounterSideUV(d, axis, y)
+    end
+    local bl = faceAxisPoint(d, x0, z0, axis0, y0, 0.16)
+    local br = faceAxisPoint(d, x0, z0, axis1, y0, 0.16)
+    local tr = faceAxisPoint(d, x0, z0, axis1, y1, 0.16)
+    local tl = faceAxisPoint(d, x0, z0, axis0, y1, 0.16)
+    local tone = 0.84
+    push({ bl, br, tr, tl },
+         { counterUV(axis0, y0), counterUV(axis1, y0),
+           counterUV(axis1, y1), counterUV(axis0, y1) },
+         { counterShade(axis0, y0, tone),
+           counterShade(axis1, y0, tone),
+           counterShade(axis1, y1, tone),
+           counterShade(axis0, y1, tone) })
+
+    -- A continuous raised lip separates the polished slab from the base. Its
+    -- front is offset from the body, so no coplanar faces can shimmer.
+    local lipY0 = math.max(y0, 6.15)
+    if y1 > lipY0 then
+      local lbl = faceAxisPoint(d, x0, z0, axis0, lipY0, 0.58)
+      local lbr = faceAxisPoint(d, x0, z0, axis1, lipY0, 0.58)
+      local ltr = faceAxisPoint(d, x0, z0, axis1, y1, 0.58)
+      local ltl = faceAxisPoint(d, x0, z0, axis0, y1, 0.58)
+      local lipTone = 1.08
+      push({ lbl, lbr, ltr, ltl },
+           { counterUV(axis0, lipY0), counterUV(axis1, lipY0),
+             counterUV(axis1, y1), counterUV(axis0, y1) },
+           { counterShade(axis0, lipY0, lipTone),
+             counterShade(axis1, lipY0, lipTone),
+             counterShade(axis1, y1, lipTone),
+             counterShade(axis0, y1, lipTone) })
+    end
+  end
+
+  -- TEST59 turns TEST58's successful geological direction up aggressively:
+  -- tighter facets, deeper strata, crags, fissures, erosion and a heavy talus
+  -- foot. The whole connected wall is textured rock rather than smooth slabs,
+  -- masonry or isolated chocolate-chip inclusions.
   local function caveNaturalSide(d, x0, z0, y0, y1, shade)
     local axis0 = (d == 5 or d == 6) and x0 or z0
     local axis1 = axis0 + 8
     local plane = d == 5 and z0 + 8 or d == 6 and z0
                or d == 1 and x0 + 8 or x0
-    local cellW, cellH = 18, 14
+    local cellW, cellH = 8, 6
     local planeSalt = 1009 + d * 37 + math.floor(plane) * 3
     local uv = caveSolidUV(CAVE_MOONSTONE_SWATCH_TILE)
+    local uvShadow = rockUV(CAVE_MOONSTONE_SWATCH_TILE, ROCK_TEXEL.shadow)
+    local uvBody = rockUV(CAVE_MOONSTONE_SWATCH_TILE, ROCK_TEXEL.body)
+
+    -- TEST71 closes the geological skin from behind. The natural facets all
+    -- project slightly out from the authored wall plane; without a continuous
+    -- rock face at depth zero, the battle camera could see the blue void
+    -- through the hairline between their displaced top edge and the walkable
+    -- cap. This single inexpensive quad also makes deep fissures reveal dark
+    -- stone instead of the world behind the wall.
+    sideSolid({ faceAxisPoint(d, x0, z0, axis0, y0, 0),
+                faceAxisPoint(d, x0, z0, axis1, y0, 0),
+                faceAxisPoint(d, x0, z0, axis1, y1, 0),
+                faceAxisPoint(d, x0, z0, axis0, y1, 0) },
+              uvShadow, shade, 0.56, d, x0, z0, y0, y1)
+
+    -- Continuous fields rather than per-tile choices. The sediment wave is
+    -- bent by macro noise; the sharper crossing field carves occasional deep
+    -- seams that interrupt it, avoiding both horizontal brick rows and dots.
+    local function wallField(axis, y)
+      local macro = caveSmoothNoise(axis * 0.78 + plane * 0.19,
+                                    y * 0.82, planeSalt + 43)
+      local warp = (caveSmoothNoise(axis * 0.59, y * 0.61,
+                                    planeSalt + 71) - 0.5) * 13.5
+      local strataWave = math.sin((y + warp) / 2.7
+        + math.sin((axis + plane * 0.17) / 13.5) * 1.12)
+      local strata = math.max(0, (strataWave + 0.02) / 0.98)
+      strata = strata * strata
+      local cross = math.abs(math.sin(axis / 5.9 + y / 8.1
+        + (caveSmoothNoise(axis * 0.71, y * 0.67,
+                           planeSalt + 89) - 0.5) * 3.4))
+      local fissure = math.max(0, (cross - 0.75) / 0.25)
+      fissure = fissure * fissure
+      local cragWave = math.abs(math.sin(axis / 4.4 - y / 6.7
+        + (caveSmoothNoise(axis * 0.91, y * 0.87,
+                           planeSalt + 97) - 0.5) * 3.0))
+      local crag = math.max(0, (cragWave - 0.55) / 0.45)
+      crag = crag * crag
+      return macro, strata, fissure, crag
+    end
 
     local function vertex(gx, gy)
+      local axis = gx * cellW
+        + (rockNoise(gx, gy, planeSalt + 11) - 0.5) * cellW * 0.28
+      local y = gy * cellH
+        + (rockNoise(gx, gy, planeSalt + 17) - 0.5) * cellH * 0.25
+      local macro, strata, fissure, crag = wallField(axis, y)
+      local baseBulge = math.max(0, 1 - math.abs(y) / 10)
+        * (0.34 + macro * 0.48)
+      local grain = (rockNoise(gx, gy, planeSalt + 23) - 0.5) * 0.42
       return {
-        gx * cellW
-          + (rockNoise(gx, gy, planeSalt + 11) - 0.5) * cellW * 0.34,
-        gy * cellH
-          + (rockNoise(gx, gy, planeSalt + 17) - 0.5) * cellH * 0.34,
-        0.16 + rockNoise(gx, gy, planeSalt + 23) * 0.58,
+        axis,
+        y,
+        math.max(0.03, 0.08 + macro * 1.22 + strata * 0.94
+          + crag * 0.47 - fissure * 0.62 + baseBulge + grain),
       }
     end
 
     local function pointShade(p)
-      local tone = 0.93
-        + caveSmoothNoise(p[1] + plane * 0.31, p[2], planeSalt + 43) * 0.12
+      local macro, strata, fissure, crag = wallField(p[1], p[2])
+      local micro = caveSmoothNoise(p[1] * 1.31 + plane * 0.23,
+                                    p[2] * 1.17, planeSalt + 113)
+      local tone = (0.54 + macro * 0.31 + strata * 0.22
+                    + crag * 0.13 - fissure * 0.43)
+        * (0.88 + micro * 0.17)
+      tone = math.max(0.28, math.min(1.22, tone))
       if type(shade) ~= "table" then return shade * tone end
       local fx = math.max(0, math.min(1, (p[1] - axis0) / 8))
       local fy = math.max(0, math.min(1, (p[2] - y0)
@@ -1743,43 +2285,85 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
       return (bottom + (top - bottom) * fy) * tone
     end
 
-    local function emitFacet(facet)
+    local function point(p)
+      return faceAxisPoint(d, x0, z0, p[1], p[2], p[3])
+    end
+
+    local function emitFacet(facet, gx, gy, half)
       local poly = caveClipFacetTile(facet, axis0, y0, axis1, y1)
       if #poly < 3 then return end
-      local function point(p)
-        return faceAxisPoint(d, x0, z0, p[1], p[2], p[3])
-      end
+      local facetTone = 0.69
+        + rockNoise(gx * 2 + half, gy, planeSalt + 127) * 0.47
+      local function facetShade(p) return pointShade(p) * facetTone end
       if #poly == 4 then
         push({ point(poly[1]), point(poly[2]),
                point(poly[3]), point(poly[4]) },
              { uv, uv, uv, uv },
-             { pointShade(poly[1]), pointShade(poly[2]),
-               pointShade(poly[3]), pointShade(poly[4]) })
+             { facetShade(poly[1]), facetShade(poly[2]),
+               facetShade(poly[3]), facetShade(poly[4]) })
       else
         for i = 2, #poly - 1 do
           local a, b, c = poly[1], poly[i], poly[i + 1]
           push({ point(a), point(b), point(c), point(c) },
                { uv, uv, uv, uv },
-               { pointShade(a), pointShade(b),
-                 pointShade(c), pointShade(c) })
+               { facetShade(a), facetShade(b),
+                 facetShade(c), facetShade(c) })
         end
       end
     end
 
-    local firstGX = math.floor((axis0 - cellW * 0.25) / cellW) - 1
-    local lastGX = math.floor((axis1 + cellW * 0.25) / cellW) + 1
-    local firstGY = math.floor((y0 - cellH * 0.25) / cellH) - 1
-    local lastGY = math.floor((y1 + cellH * 0.25) / cellH) + 1
+    local firstGX = math.floor((axis0 - cellW * 0.30) / cellW) - 1
+    local lastGX = math.floor((axis1 + cellW * 0.30) / cellW) + 1
+    local firstGY = math.floor((y0 - cellH * 0.30) / cellH) - 1
+    local lastGY = math.floor((y1 + cellH * 0.30) / cellH) + 1
     for gy = firstGY, lastGY do
       for gx = firstGX, lastGX do
         local bl, br = vertex(gx, gy), vertex(gx + 1, gy)
         local tr, tl = vertex(gx + 1, gy + 1), vertex(gx, gy + 1)
-        if rockNoise(gx, gy, planeSalt + 53) < 0.5 then
-          emitFacet({ bl, br, tr })
-          emitFacet({ bl, tr, tl })
+        if rockNoise(gx, gy, planeSalt + 131) < 0.5 then
+          emitFacet({ bl, br, tr }, gx, gy, 1)
+          emitFacet({ bl, tr, tl }, gx, gy, 2)
         else
-          emitFacet({ bl, br, tl })
-          emitFacet({ br, tr, tl })
+          emitFacet({ bl, br, tl }, gx, gy, 1)
+          emitFacet({ br, tr, tl }, gx, gy, 2)
+        end
+      end
+    end
+
+    -- A shallow, irregular talus lip breaks the ruler-straight base where the
+    -- first wall band meets the floor. It is the same brown rock family—not a
+    -- row of objects—and slopes back into the continuous face above it.
+    if y0 < 7.9 then
+      local footCell = 4.5
+      local first = math.floor((axis0 - footCell) / footCell) - 1
+      local last = math.floor((axis1 + footCell) / footCell) + 1
+      for i = first, last do
+        local rawA = i * footCell
+          + (rockNoise(i, math.floor(plane), planeSalt + 151) - 0.5) * 1.45
+        local rawB = (i + 1) * footCell
+          + (rockNoise(i + 1, math.floor(plane), planeSalt + 151) - 0.5) * 1.45
+        local a, b = math.max(axis0, rawA), math.min(axis1, rawB)
+        if b > a then
+          local topA = y0 + 0.88
+            + rockNoise(i, math.floor(plane), planeSalt + 157) * 1.92
+          local topB = y0 + 0.88
+            + rockNoise(i + 1, math.floor(plane), planeSalt + 157) * 1.92
+          local lowA = { a, y0 + 0.02,
+            1.24 + rockNoise(i, math.floor(plane), planeSalt + 163) * 1.02 }
+          local lowB = { b, y0 + 0.02,
+            1.24 + rockNoise(i + 1, math.floor(plane), planeSalt + 163) * 1.02 }
+          local highB = { b, topB,
+            0.62 + rockNoise(i + 1, math.floor(plane), planeSalt + 167) * 0.73 }
+          local highA = { a, topA,
+            0.62 + rockNoise(i, math.floor(plane), planeSalt + 167) * 0.73 }
+          local footTone = 0.72
+            + rockNoise(i, math.floor(plane), planeSalt + 173) * 0.28
+          push({ point(lowA), point(lowB), point(highB), point(highA) },
+               { uvShadow, uvShadow, uvBody, uvBody },
+               { pointShade(lowA) * footTone * 0.86,
+                 pointShade(lowB) * footTone * 0.86,
+                 pointShade(highB) * footTone,
+                 pointShade(highA) * footTone })
         end
       end
     end
@@ -1889,17 +2473,38 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
         s = nil
       end
 
+      -- TEST137 battle cameras do not draw the free-roam indoor underlay.
+      -- Claimed grave/prop cells can therefore expose the blue scene void
+      -- through a missing source-floor fragment even though the monument is
+      -- correct. Give every claimed Tower footprint an opaque, slightly
+      -- recessed copy of the continuous honed floor. Real descending
+      -- stairwells remain open by design.
+      if towerInterior and inBody and s and S.skip[k]
+          and s.class ~= "stair_down_e" and s.class ~= "stair_down_w"
+          and s.class ~= "stair_down_n" and s.class ~= "ladder_down" then
+        towerGraniteTop(tx, ty, tx * 8, ty * 8, -0.04, 1,
+                        TOWER_GRANITE_SWATCH_TILE, false)
+      end
+
       if s and S.skip[k] then
         -- an object stands here; paint its synthesized ground and let the
         -- prebuilt prism quads (appended below) carry the art
         local g = S.ground[k]
         if g then
           local caveKind = caveSurfaceKind({ class="ground" }, g)
-          if caveKind then
+          if viridianForest then
+            forestGroundTop(tx, ty, tx * 8, ty * 8, 0, 0, 1)
+          elseif towerInterior then
+            towerGraniteTop(tx, ty, tx * 8, ty * 8, 0,
+                            1, g, g == 34 and "healing" or false)
+          elseif caveKind then
             caveNaturalTop(tx, ty, tx * 8, ty * 8, 0, 1, caveKind)
           elseif isKantoCourtyardAt(tx, ty, g) then
             kantoCourtyardTop(tx, ty, tx * 8, ty * 8, 0,
                              aoShades(tx, ty, 0, 1))
+          elseif lavenderGround and isLavenderGroundTile(g) then
+            lavenderGroundTop(tx, ty, tx * 8, ty * 8, 0,
+                              aoShades(tx, ty, 0, 1))
           elseif CommunityVisuals.customRoads() and KANTO_PATH_TILE[g] then
             local finish, finishAxis = claimedPathFinishAt(tx, ty)
             if finish == "wood" then
@@ -1992,7 +2597,11 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           -- Ship portholes belong on vertical faces; tile 16 is plain white.
           if map.tileset.id == "SHIP" and s.class == "wall" then topTile = 16 end
           local caveKind = caveSurfaceKind(s, tile)
-          if caveKind then
+          if towerInterior and s.class == "wall" then
+            towerGraniteTop(tx, ty, x0, z0, h,
+                            VOLUME_TOP_SHADE,
+                            TOWER_GRANITE_SWATCH_TILE, "wall")
+          elseif caveKind then
             caveNaturalTop(tx, ty, x0, z0, h, VOLUME_TOP_SHADE, caveKind)
           elseif isKantoRetainingWall(s, tile, run, tx, ty) then
             ledgeRockTop(tx, ty, x0, z0, h, RETAINING_SWATCH_TILE,
@@ -2047,13 +2656,34 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           -- on the pond.
           local paved = kantoSurfaceKind(s, tile)
           local caveKind = caveSurfaceKind(s, tile)
-          if caveKind then
+          if towerInterior and s.class == "wall" then
+            towerGraniteTop(tx, ty, x0, z0, h,
+                            s.art == "upright" and VOLUME_TOP_SHADE or 1,
+                            TOWER_GRANITE_SWATCH_TILE, "wall")
+          elseif towerInterior and s.class == "counter" then
+            towerGraniteTop(tx, ty, x0, z0, h,
+                            s.art == "upright" and VOLUME_TOP_SHADE or 1,
+                            TOWER_GRANITE_SWATCH_TILE, "counter")
+          elseif caveKind then
             caveNaturalTop(tx, ty, x0, z0, h,
                            s.art == "upright" and VOLUME_TOP_SHADE or 1,
                            caveKind)
+          elseif viridianForest and s.class == "ground" then
+            forestGroundTop(tx, ty, x0, z0, h, topTile,
+                            s.art == "upright" and VOLUME_TOP_SHADE or 1)
           elseif isKantoCourtyardAt(tx, ty) and s.flat then
             kantoCourtyardTop(tx, ty, x0, z0, h,
                              aoShades(tx, ty, h, 1))
+          elseif lavenderGround and s.class == "ground"
+                 and (isLavenderGroundTile(tile)
+                      or isLavenderGroundTile(topTile)) then
+            lavenderGroundTop(tx, ty, x0, z0, h,
+                              aoShades(tx, ty, h, 1))
+          elseif towerInterior and s.class == "ground" then
+            towerGraniteTop(tx, ty, x0, z0, h,
+                            1, topTile,
+                            (tile == 34 or topTile == 34)
+                              and "healing" or false)
           elseif paved == "path" then
             kantoPavedTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))
           elseif paved == "wood" then
@@ -2140,14 +2770,18 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
                 end
                 local faceShade = sideShades(hl, hr, y0, y1,
                                              y0 <= nh, shade)
-                -- TEST36: restore TEST25/26's approved warm cut-stone courses
-                -- on cave walls and shelf risers. Tile 2 carries the cave-only
-                -- brown D/S/B/L swatches; outdoor retaining walls continue to
-                -- use their independent selected material below.
-                if tileset.id == "CAVERN"
+                -- TEST56 natural cave rock. Cave walls and shelf risers share
+                -- one continuous, world-space geological skin: irregular
+                -- facets cross hidden tile and vertical-band boundaries with
+                -- no courses, mortar, repeated blocks or manufactured joints.
+                -- Outdoor retaining walls keep their independent masonry path.
+                if towerInterior and s.class == "wall" then
+                  towerGraniteSide(d, x0, z0, y0, y1, faceShade)
+                elseif towerInterior and s.class == "counter" then
+                  towerGraniteCounterSide(d, x0, z0, y0, y1, faceShade)
+                elseif CommunityVisuals.customCaves() and tileset.id == "CAVERN"
                    and (s.class == "wall" or s.class == "ledge") then
-                  retainingRockSide(d, x0, z0, y0, y1, faceShade,
-                                    CAVE_MOONSTONE_SWATCH_TILE)
+                  caveNaturalSide(d, x0, z0, y0, y1, faceShade)
                 -- Match the top-face scope above: indoor CAVERN ledges keep
                 -- their own folded riser art rather than outdoor masonry.
                 elseif CommunityVisuals.customWalls() and tileset.id == "OVERWORLD"
@@ -2224,9 +2858,19 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
 
   local scUV = { { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } }
   local function quadUV(q)
-    if q.uv then return q.uv end
     for i = 1, 4 do
-      scUV[i][1], scUV[i][2] = q.u, q.v
+      local uv = q.uv and q.uv[i] or nil
+      -- Structures builds authored props against the source tileset atlas.
+      -- Tower's finished atlas is larger only because TEST123 appends two
+      -- 1024px stone materials,
+      -- so renormalize those legacy pixel coordinates into the expanded image.
+      if towerInterior and q.towerMaterial then
+        local tuv = towerDetailUV(q.towerMaterial, q[i], q)
+        scUV[i][1], scUV[i][2] = tuv[1], tuv[2]
+      else
+        scUV[i][1] = (uv and uv[1] or q.u) * sourceAtlasW / atlasW
+        scUV[i][2] = (uv and uv[2] or q.v) * sourceAtlasH / atlasH
+      end
     end
     return scUV
   end
@@ -2356,7 +3000,20 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
       keepAll = keepQuad(mx - e, mz - e, mx + e, mz + e)
       skipAll = not keepAll
     end
-    if not skipAll then
+    if not skipAll and st.forestBoulder then
+      -- ForestDressing owns the complete replacement at this cell.
+    elseif not skipAll and st.hideCrown and st.lift and st.lift > 0
+       and st.baseY ~= nil then
+      -- TEST92: the replacement owns every visible crown vertex. Publishing
+      -- its cached template base is the only work this hidden stamp requires.
+      local globalName = st.communityTree
+        and "__ds_round_base" or "__bav_granite_pillar_base"
+      local rb = rawget(_G, globalName)
+      if not rb then rb = {}; _G[globalName] = rb end
+      local mk = map.id or (map.def and map.def.id) or tostring(map)
+      local bk = mk .. ":" .. st.mx .. "|" .. st.mz
+      if rb[bk] == nil or st.baseY < rb[bk] then rb[bk] = st.baseY end
+    elseif not skipAll then
       -- Keep ownership on the authored cell even when a Legendary crown
       -- extends beyond it. Cut must not remove a neighbouring tree.
       if own and inBodyPx(mx, mz) then
@@ -2478,15 +3135,30 @@ local function quadListSpans(quads, perQuad)
   return spans
 end
 
-local function quadsMesh(quads)
+local function auxiliaryUVScale(map)
+  local id = tostring(map and map.id or ""):upper()
+  local tower = map and map.tileset and map.tileset.id == "CEMETERY"
+    and id:match("^POKEMON_TOWER_[1-7]F$") ~= nil
+    and CommunityVisuals.customTower()
+  if not tower then return 1, 1 end
+  local sw = map.tileset.imageWidth or 128
+  local sh = map.tileset.imageHeight or 48
+  -- Match TerrainAtlas: wall + counter across, wall + floor vertically.
+  return sw / (sw + 2048 + 1024), sh / math.max(sh, 2048 + 2048)
+end
+
+local function quadsMesh(quads, uScale, vScale)
   if #quads == 0 then return nil end
+  uScale, vScale = uScale or 1, vScale or 1
   local spans = quadListSpans(quads, 4)
   local verts, indices, n = {}, {}, 0
   for _, q in ipairs(quads) do
     for i = 1, 4 do
       local c = q[i]
       local uv = q.uv and q.uv[i] or { q.u, q.v }
-      verts[#verts + 1] = { c[1], c[2], c[3], uv[1], uv[2], q.shade }
+      verts[#verts + 1] = {
+        c[1], c[2], c[3], uv[1] * uScale, uv[2] * vScale, q.shade,
+      }
     end
     Voxel3D.pushQuad(indices, n)
     n = n + 1
@@ -2497,9 +3169,10 @@ end
 -- Flatten auxiliary quads into the same unindexed six-float stream terrain
 -- uses. This path is selected only when persistent caching is available; the
 -- historical table builder remains the headless/non-FFI fallback.
-local function rawQuads(quads)
+local function rawQuads(quads, uScale, vScale)
   local n = #(quads or {}) * 6
   if n == 0 then return { n = 0 } end
+  uScale, vScale = uScale or 1, vScale or 1
   if MeshDisk.legacy() and ffi then
     local buf, at = ffi.new("float[?]", n * 6), 0
     for _, q in ipairs(quads) do
@@ -2508,7 +3181,8 @@ local function rawQuads(quads)
         local c = q[i]
         local uv = q.uv and q.uv[i] or { q.u, q.v }
         buf[at], buf[at + 1], buf[at + 2] = c[1], c[2], c[3]
-        buf[at + 3], buf[at + 4], buf[at + 5] = uv[1], uv[2], q.shade
+        buf[at + 3], buf[at + 4], buf[at + 5] =
+          uv[1] * uScale, uv[2] * vScale, q.shade
         at = at + 6
       end
       Budget.tick()
@@ -2523,7 +3197,8 @@ local function rawQuads(quads)
       local c = q[i]
       local uv = q.uv and q.uv[i] or { q.u, q.v }
       values[at], values[at + 1], values[at + 2] = c[1], c[2], c[3]
-      values[at + 3], values[at + 4], values[at + 5] = uv[1], uv[2], q.shade
+      values[at + 3], values[at + 4], values[at + 5] =
+        uv[1] * uScale, uv[2] * vScale, q.shade
       at = at + 6
     end
     parts[#parts + 1] = love.data.pack(
@@ -2539,13 +3214,14 @@ end
 
 local function buildRawAux(map)
   local structures = Structures.forMap(map)
+  local uScale, vScale = auxiliaryUVScale(map)
   local aux = {
-    grass = rawQuads(structures.grassQuads),
-    flowers = rawQuads(structures.flowerQuads),
+    grass = rawQuads(structures.grassQuads, uScale, vScale),
+    flowers = rawQuads(structures.flowerQuads, uScale, vScale),
     figures = {},
   }
   for _, figure in ipairs(structures.figures or {}) do
-    local raw = rawQuads(figure.quads)
+    local raw = rawQuads(figure.quads, uScale, vScale)
     if raw.n > 0 then
       local width = 0
       for _, q in ipairs(figure.quads) do
@@ -2581,7 +3257,8 @@ end
 -- walker's feet (characters stamp over terrain, Gen 1 style, so ordinary
 -- terrain could never do this).
 local function buildGrassMesh(map)
-  return quadsMesh(Structures.forMap(map).grassQuads)
+  local uScale, vScale = auxiliaryUVScale(map)
+  return quadsMesh(Structures.forMap(map).grassQuads, uScale, vScale)
 end
 
 -- The flower billboards as their own mesh, for the same reason as the
@@ -2593,7 +3270,8 @@ end
 -- sun pass draws it): a handful of flowers per meadow, not thousands of
 -- tufts.
 local function buildFlowerMesh(map)
-  return quadsMesh(Structures.forMap(map).flowerQuads)
+  local uScale, vScale = auxiliaryUVScale(map)
+  return quadsMesh(Structures.forMap(map).flowerQuads, uScale, vScale)
 end
 
 -- Authored FIGURES (a person drawn into furniture) as one mesh each, in
@@ -2609,8 +3287,9 @@ end
 -- its middle -- a card yawed about its left edge swings off its seat.
 local function buildFigureMeshes(map)
   local out = {}
+  local uScale, vScale = auxiliaryUVScale(map)
   for _, f in ipairs(Structures.forMap(map).figures or {}) do
-    local mesh = quadsMesh(f.quads)
+    local mesh = quadsMesh(f.quads, uScale, vScale)
     if mesh then
       local w = 0
       for _, q in ipairs(f.quads) do
@@ -2656,12 +3335,94 @@ local function swapVisualSlot(c, slot, visuals)
   c[name] = visuals
 end
 
-local function mapHasVisualObjects(map)
-  local companion = V.companion
-  if companion and type(companion.wantsVisualObjects) == "function" then
-    local ok, wanted = pcall(companion.wantsVisualObjects, companion)
-    if ok and not wanted then return false end
+-- TEST96 CACHED LEGENDARY SIDECAR:
+-- Terrain streams survive a restart, but the tiny Lua registries that locate
+-- replacement trees/pillars historically did not. Serialise only those owner
+-- cells and their published bases beside the terrain stream. This is several
+-- lines per prop, not another geometry copy, and lets a cache hit restore the
+-- exact inputs CommunityFlora expects without rerunning Structures.
+local function registrySnapshot(map)
+  local key = tostring(map.id or (map.def and map.def.id) or map)
+  local treeCells = (rawget(_G, "__ds_round_cells") or {})[key] or {}
+  local saplings = (rawget(_G, "__ds_sapling_cells") or {})[key] or {}
+  local treeBases = rawget(_G, "__ds_round_base") or {}
+  local pillarCells = (rawget(_G, "__bav_granite_pillars") or {})[key] or {}
+  local pillarBases = rawget(_G, "__bav_granite_pillar_base") or {}
+  local lines = {}
+  local function numberToken(value)
+    return type(value) == "number" and string.format("%.17g", value) or "n"
   end
+  for cell, lift in pairs(treeCells) do
+    local cx, cy = tostring(cell):match("^(-?%d+)|(-?%d+)$")
+    if cx and cy and type(lift) == "number" then
+      local base = treeBases[key .. ":" .. (tonumber(cx) * 16 + 8)
+                             .. "|" .. (tonumber(cy) * 16 + 8)]
+      lines[#lines + 1] = table.concat({
+        "T", cx, cy, numberToken(lift), numberToken(base),
+        saplings[cell] == true and "1" or "0",
+      }, "\t")
+    end
+  end
+  for cell in pairs(pillarCells) do
+    local cx, cy = tostring(cell):match("^(-?%d+)|(-?%d+)$")
+    if cx and cy then
+      local base = pillarBases[key .. ":" .. (tonumber(cx) * 16 + 8)
+                               .. "|" .. (tonumber(cy) * 16 + 8)]
+      lines[#lines + 1] = table.concat({
+        "P", cx, cy, "1", numberToken(base), "0",
+      }, "\t")
+    end
+  end
+  table.sort(lines)
+  return table.concat(lines, "\n")
+end
+
+local function restoreRegistrySnapshot(map, payload)
+  if type(payload) ~= "string" then return false end
+  local key = tostring(map.id or (map.def and map.def.id) or map)
+  local rounds = rawget(_G, "__ds_round_cells") or {}
+  local saplings = rawget(_G, "__ds_sapling_cells") or {}
+  local treeBases = rawget(_G, "__ds_round_base") or {}
+  local pillars = rawget(_G, "__bav_granite_pillars") or {}
+  local pillarBases = rawget(_G, "__bav_granite_pillar_base") or {}
+  _G.__ds_round_cells, _G.__ds_sapling_cells = rounds, saplings
+  _G.__ds_round_base = treeBases
+  _G.__bav_granite_pillars = pillars
+  _G.__bav_granite_pillar_base = pillarBases
+  local roundMap = rounds[key] or {}
+  local saplingMap = saplings[key] or {}
+  local pillarMap = pillars[key] or {}
+  for cell in pairs(roundMap) do roundMap[cell] = nil end
+  for cell in pairs(saplingMap) do saplingMap[cell] = nil end
+  for cell in pairs(pillarMap) do pillarMap[cell] = nil end
+  rounds[key], saplings[key], pillars[key] = roundMap, saplingMap, pillarMap
+  for line in payload:gmatch("[^\n]+") do
+    local kind, sx, sy, valueToken, baseToken, saplingToken =
+      line:match("^([TP])\t(-?%d+)\t(-?%d+)\t([^\t]+)\t([^\t]+)\t([01])$")
+    local cx, cy = tonumber(sx), tonumber(sy)
+    local value, base = tonumber(valueToken), tonumber(baseToken)
+    if kind and cx and cy and value then
+      local cell = sx .. "|" .. sy
+      local baseKey = key .. ":" .. (cx * 16 + 8) .. "|" .. (cy * 16 + 8)
+      if kind == "T" then
+        roundMap[cell] = value
+        if saplingToken == "1" then saplingMap[cell] = true end
+        if base ~= nil then treeBases[baseKey] = base end
+      else
+        pillarMap[cell] = true
+        if base ~= nil then pillarBases[baseKey] = base end
+      end
+    end
+  end
+  if next(rounds[key]) then _G.__ds_tree_lift = true end
+  return true
+end
+
+local function mapHasVisualObjects(map)
+  -- Revision-36 caches one canonical split regardless of which companion
+  -- extensions happened to be active while PRECACHE ran. Without this, a
+  -- cache generated before an overworld-model provider loaded would bake the
+  -- sign into terrain forever and could never suppress it later.
   for _, quad in ipairs(Structures.forMap(map).objectQuads or {}) do
     if quad.visualObjectId then return true end
   end
@@ -2790,31 +3551,28 @@ local function runJob(job)
   end
 
   local mesh, water, visualMeshes, spans
-  -- Annotated originals are small session meshes beside the canonical terrain.
-  -- Older persistent terrain records contain those quads, so annotated maps do
-  -- not read those records. New records contain only the canonical terrain;
-  -- write them so the title precache can complete, while the sign sidecars are
-  -- rebuilt in-session and remain available to the companion pass.
-  local annotatedVisuals = mapHasVisualObjects(map)
-  -- Legendary Visuals trees and TEST366 pillars publish owner/base registries while
-  -- Structures expands the terrain stamp. A disk-restored vertex stream has
-  -- the pixels but cannot replay those Lua-side registrations, which made the
-  -- selected trees disappear after a cached load. Rebuild these two opt-in
-  -- modes once per session; all ordinary Battle Art/cache paths stay intact.
-  local registryVisuals = CommunityVisuals.customTrees()
-    or CommunityVisuals.customCutTrees()
-    or CommunityVisuals.customPillars()
   -- The moving vessel is a session mesh, also needed after disk restoration.
   local sessionVessel = map.id == "VERMILION_DOCK" and V.require("ShipHull").enabled(map)
-  local cached = not annotatedVisuals and not registryVisuals and not sessionVessel
+  -- TEST96: ask for the complete cached answer before invoking Structures.
+  -- Revision-36 records include suppressible sign streams plus tree/pillar
+  -- registries, so those features no longer make a cache hit ineligible.
+  local cached = not sessionVessel and not job.bypassCache
     and MeshDisk.loadTerrain(map, job.slot, job.masks) or nil
   if cached then
+    restoreRegistrySnapshot(map, cached.registry)
     mesh = meshFromRaw(cached.terrain)
     water = meshFromRaw(cached.water)
     -- the prop runs were written with the record: a precached map can drop a
     -- felled tree without ever having run the geometry pass this session
     spans = cached.spans
+    visualMeshes = {}
+    for id, raw in pairs(cached.visuals or {}) do
+      local visualMesh = meshFromRaw(raw)
+      if visualMesh then visualMeshes[id] = visualMesh end
+    end
+    if not next(visualMeshes) then visualMeshes = nil end
   else
+    local annotatedVisuals = mapHasVisualObjects(map)
     local sink, waterSink = newSink(), newSink()
     local visualSinks = annotatedVisuals and {} or nil
     runGeometry(map, job.slot == "body", job.masks, sink, waterSink,
@@ -2824,12 +3582,16 @@ local function runJob(job)
     mesh, water = sink.finish(), waterSink.finish()
     spans = (terrainRaw and terrainRaw.spans)
             or (sink.spans and sink.spans()) or nil
+    local visualRaw = {}
     if visualSinks then
       visualMeshes = {}
       for id, visualSink in pairs(visualSinks) do
+        local raw = visualSink.raw and visualSink.raw() or nil
+        if raw and raw.n and raw.n > 0 then visualRaw[id] = raw end
         local visualMesh = visualSink.finish()
         if visualMesh then visualMeshes[id] = visualMesh end
       end
+      if not next(visualMeshes) then visualMeshes = nil end
     end
     if not current() then
       if mesh and mesh.release then pcall(mesh.release, mesh) end
@@ -2837,9 +3599,10 @@ local function runJob(job)
       releaseVisualMeshes(visualMeshes)
       return
     end
-    if terrainRaw and waterRaw then
+    if terrainRaw and waterRaw and not job.bypassCache then
       local savedTerrain, terrainError =
-        MeshDisk.saveTerrain(map, job.slot, job.masks, terrainRaw, waterRaw)
+        MeshDisk.saveTerrain(map, job.slot, job.masks, terrainRaw, waterRaw,
+          visualRaw, registrySnapshot(map))
       if not savedTerrain then
         print("[warn] voxel terrain cache write failed for " .. tostring(job.id)
               .. " " .. tostring(job.slot) .. ": " .. tostring(terrainError))
@@ -2894,7 +3657,8 @@ function ChunkMesher.request(map, bodyOnly, masks, priority)
   if not job then
     jobFailures[key] = nil
     job = { id = map.id, map = map, slot = slot, masks = masks,
-            priority = requested, gen = gen[map.id] or 0 }
+            priority = requested, gen = gen[map.id] or 0,
+            bypassCache = stale and true or false }
     jobIndex[key] = job
     jobs[#jobs + 1] = job
   elseif type(priority) == "number" and (job.priority or 0) < 2 then
@@ -3006,9 +3770,10 @@ function ChunkMesher.pump(covered)
     -- Cap the whole pump, not each resumed job separately. Keep the registered
     -- coroutine guard in BuildBudget even with more frequent visible polling.
     Budget.begin(pick.co, deadline - clock(), covered and 32 or 4)
-    local ok, err = coroutine.resume(pick.co, pick)
+    local ok, err = Timings.resume(pick.co, pick)
     Budget.finish()
     if not ok then
+      Timings.jobError()
       finishJob(pick, false, err)
     elseif coroutine.status(pick.co) == "dead" then
       finishJob(pick, true)
@@ -3398,6 +4163,28 @@ function ChunkMesher.purgeCache()
   ChunkMesher.invalidate()
   if Disk and Disk.purge then
     pcall(Disk.purge)
+  end
+end
+
+-- Exclusive timings: geometry includes its existing inline packing; upload
+-- preparation excludes separately measured driver allocations and writes.
+runGeometry = Timings.wrap("terrain_build", runGeometry)
+buildRawAux = Timings.wrap("terrain_build", buildRawAux)
+buildGrassMesh = Timings.wrap("terrain_build", buildGrassMesh)
+buildFlowerMesh = Timings.wrap("terrain_build", buildFlowerMesh)
+buildFigureMeshes = Timings.wrap("terrain_build", buildFigureMeshes)
+meshFromRaw = Timings.wrap("terrain_upload", meshFromRaw)
+meshesFromRawAux = Timings.wrap("terrain_upload", meshesFromRawAux)
+runJob = Timings.wrap("terrain_other", runJob)
+ChunkMesher.pump = Timings.wrap("terrain_other", ChunkMesher.pump)
+ChunkMesher.build = Timings.wrap("terrain_other", ChunkMesher.build)
+do
+  local original = newSink
+  newSink = function(...)
+    local sink = original(...)
+    sink.finish = Timings.wrap("terrain_upload", sink.finish)
+    if sink.raw then sink.raw = Timings.wrap("terrain_upload", sink.raw) end
+    return sink
   end
 end
 

@@ -35,6 +35,34 @@ local TileRenderer = require("src.render.TileRenderer")
 local PaletteFX = require("src.render.PaletteFX")
 local CommunityVisuals = V.require("CommunityVisuals")
 
+-- TEST125 appends five independent high-resolution materials to Pokemon
+-- Tower's otherwise tiny 8px tile atlas. The new 2048px reference granite
+-- belongs only to walls and architectural ribs; TEST123's approved 1024px
+-- black granite is preserved exclusively for the counter; a separate 2048px
+-- honed slab belongs to the floor.
+-- Keeping the original atlas at (0, 0) preserves every authored tile and
+-- animation coordinate; all three extensions are Tower-only.
+local TOWER_WALL_SIZE = 2048
+local TOWER_COUNTER_SIZE = 1024
+local TOWER_FLOOR_SIZE = 2048
+local TOWER_DETAIL_SIZE = 1024
+local MOD_PATH = V.path or "mods/BATTLE_ART_VOXEL_FORK"
+local TOWER_WALL_PATHS = {
+  smoke_black = MOD_PATH .. "/assets/legendary/tower_reference_wall.png",
+  storm_white = MOD_PATH .. "/assets/legendary/tower_wall_storm_white.png",
+  pearl_white = MOD_PATH .. "/assets/legendary/tower_wall_pearl_white.png",
+}
+local TOWER_COUNTER_PATH = (V.path or "mods/BATTLE_ART_VOXEL_FORK")
+  .. "/assets/legendary/tower_luxury_granite.png"
+local TOWER_COUNTER_TOP_PATH = (V.path or "mods/BATTLE_ART_VOXEL_FORK")
+  .. "/assets/legendary/tower_counter_top_pearl.png"
+local TOWER_FLOOR_PATH = (V.path or "mods/BATTLE_ART_VOXEL_FORK")
+  .. "/assets/legendary/tower_honed_floor.png"
+local TOWER_STAIR_PATH = (V.path or "mods/BATTLE_ART_VOXEL_FORK")
+  .. "/assets/legendary/tower_aged_wood.png"
+local TOWER_GRAVE_PATH = (V.path or "mods/BATTLE_ART_VOXEL_FORK")
+  .. "/assets/legendary/tower_grave_stone.png"
+
 local TerrainAtlas = {}
 
 local cache = {}
@@ -431,21 +459,68 @@ local GRASS_ART = {
   "BBSSBBLB", "BSLLSBBB", "SSBLLBBS", "BLBSSSBB",
   "BBSSBLBB", "SBBLSSLB", "BLSBBBSS", "SSBBLSBB",
 }
+-- TEST111 Lavender Town uses one restrained earth family for both the authored
+-- turf and path cells. Keeping the four swatches close together removes the
+-- neon green/flat-grey checkerboard while retaining subtle embedded grain.
+local LAVENDER_GROUND_ART = {
+  "BBBBBBBB", "BBBBBSBB", "BBBBBBBB", "BBLBBBBB",
+  "BBBBBBBB", "BBBBBBBB", "BBBBDBBB", "BBBBBBBB",
+}
+-- TEST115 Pokemon Tower. ChunkMesher now supplies continuous world-space
+-- granite, so this donor is deliberately quiet and cannot announce the 8px
+-- source grid if a fallback face ever samples the whole tile.
+local TOWER_FLOOR_ART = {
+  "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB",
+  "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB",
+}
+-- TEST96 Viridian floor: broad clustered moss and sparse brown leaf litter,
+-- not the evenly spaced dark-dot grid of the source tile. Four related
+-- variants plus ChunkMesher's coordinate rotation keep an 8px donor from
+-- announcing itself as wallpaper across the forest.
+local FOREST_GROUND_ART = {
+  {
+    "BBBBBBBB", "BBSSSBBB", "BSSSSBBB", "BBSSBBBB",
+    "BBBBBBDB", "BBBBBDDB", "BLBBBBBB", "BBBBBBBB",
+  },
+  {
+    "BBBBLBBB", "BBBBBBBB", "BSSBBBBB", "SSSBBBBB",
+    "BSSBBBBB", "BBBBBDBB", "BBBBBDDB", "BBBBBBBB",
+  },
+  {
+    "BBBBBBBB", "BDBBBBBB", "BDDBBLBB", "BBBBBBBB",
+    "BBBSSSBB", "BBSSSSBB", "BBBSSBBB", "BBBBBBBB",
+  },
+  {
+    "BBBBBBBB", "BBBBBSSB", "BBBBSSSS", "BBBBBSSB",
+    "BDBBBBBB", "BDDBBBBB", "BBBBLBBB", "BBBBBBBB",
+  },
+}
 local COURT_ART = {
   "DDDDDDDD", "DBBBBBBD", "DBBLBBBD", "DBBBBBBD",
   "DBBBLBDD", "DBBBBBBD", "DBLBBBBD", "DDDDDDDD",
 }
 
--- TEST36 warm brick / quiet cap atlas. Keep every ordinary top donor solid so
--- the source-tile grid cannot become a confetti field. ChunkMesher supplies
--- broad fixed facets instead. Tile 2 retains four cave-only colour swatches
--- for the restored TEST25/26 cut-stone wall courses.
+-- TEST36 warm brick / quiet cap atlas. TEST62 deliberately gives only the
+-- walkable earth donors dense, low-contrast soil grain; shelf and wall donors
+-- remain solid because their detail comes from real geological geometry.
+-- Tile 2 retains four cave-only colour swatches for raised wall geometry.
 local CAVE_BEDROCK_ART = {
   "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB",
   "BBBBBBBB", "BBBBBBBB", "BBBBBBBB", "BBBBBBBB",
 }
 local CAVE_FLOOR_ART = {
-  CAVE_BEDROCK_ART, CAVE_BEDROCK_ART, CAVE_BEDROCK_ART,
+  {
+    "BSBBSDBS", "BBDSBBBL", "SBBBSBBD", "BLSBBDBB",
+    "BBBSBSBB", "DBBBSBBS", "BBLBBDBB", "SBBDBBSB",
+  },
+  {
+    "BDBBSBBS", "SBBBLBDB", "BBSSBBBL", "BDBBBSBB",
+    "BBLBDBBS", "SBBSBBDB", "BBDBSBBL", "LBBSDBBB",
+  },
+  {
+    "BBLBSBBD", "SBBDBBSB", "BBSBBLBB", "DBBSBBBS",
+    "BBBSDBBL", "SBLBBBSB", "BBDBSBBS", "BSBBLDBB",
+  },
 }
 local CAVE_LEDGE_ART = {
   CAVE_BEDROCK_ART, CAVE_BEDROCK_ART, CAVE_BEDROCK_ART,
@@ -468,16 +543,16 @@ local CAVE_WATER_ART = {
 }
 
 local CAVE_EARTH = {
-  dark={.145,.098,.080,1}, shadow={.205,.145,.112,1},
-  body={.285,.205,.155,1}, light={.355,.275,.215,1},
+  dark={.090,.048,.026,1}, shadow={.135,.075,.038,1},
+  body={.190,.115,.060,1}, light={.250,.165,.085,1},
 }
 local CAVE_SHELF = {
-  dark={.125,.085,.073,1}, shadow={.205,.142,.118,1},
-  body={.305,.220,.178,1}, light={.395,.300,.240,1},
+  dark={.080,.048,.038,1}, shadow={.155,.088,.064,1},
+  body={.270,.170,.125,1}, light={.390,.270,.190,1},
 }
 local CAVE_ROCK = {
-  dark={.095,.065,.061,1}, shadow={.180,.120,.108,1},
-  body={.285,.195,.162,1}, light={.375,.285,.225,1},
+  dark={.060,.035,.032,1}, shadow={.135,.073,.060,1},
+  body={.235,.140,.108,1}, light={.355,.235,.170,1},
 }
 local CAVE_WATER = {
   dark={.055,.085,.120,1}, shadow={.080,.135,.185,1},
@@ -500,6 +575,61 @@ local GRASS = {
   dark={.17,.35,.12,1}, shadow={.22,.43,.16,1},
   body={.27,.50,.20,1}, light={.33,.57,.26,1},
 }
+local LAVENDER_GROUND = {
+  dark={.115,.090,.155,1}, shadow={.160,.125,.210,1},
+  body={.215,.170,.275,1}, light={.285,.230,.350,1},
+}
+local TOWER_FLOOR = {
+  dark={.135,.135,.150,1}, shadow={.205,.205,.220,1},
+  body={.305,.305,.320,1}, light={.410,.405,.420,1},
+}
+-- `recolor` palettes follow the source Game Boy shade order: brightest first.
+-- TEST115 moves the Tower away from black brick toward the reference's broad,
+-- cloudy grey granite. A restrained violet cast remains only in the shadows.
+local TOWER_STONE = {
+  [1]={.690,.690,.705,1}, [2]={.505,.505,.525,1},
+  [3]={.315,.315,.340,1}, [4]={.115,.112,.145,1},
+}
+local TOWER_MASONRY = {
+  dark={.115,.115,.130,1}, shadow={.245,.245,.260,1},
+  body={.455,.455,.465,1}, light={.720,.720,.730,1},
+}
+local TOWER_COUNTER = {
+  [1]={.650,.645,.660,1}, [2]={.485,.480,.500,1},
+  [3]={.305,.300,.325,1}, [4]={.110,.105,.135,1},
+}
+local TOWER_GRAVE = {
+  [1]={.615,.610,.635,1}, [2]={.440,.435,.465,1},
+  [3]={.260,.255,.290,1}, [4]={.095,.090,.130,1},
+}
+local TOWER_FIXTURE = {
+  [1]={.420,.350,.250,1}, [2]={.285,.225,.180,1},
+  [3]={.155,.120,.125,1}, [4]={.055,.045,.075,1},
+}
+local FOREST_GROUND = {
+  -- D is intentionally warm: the rare D flecks become fallen leaves rather
+  -- than more green confetti. S/B/L remain one restrained moss family.
+  dark={.18,.135,.055,1}, shadow={.090,.245,.075,1},
+  body={.175,.365,.105,1}, light={.285,.475,.165,1},
+}
+local FOREST_TALL_GRASS = {
+  [1]={.285,.475,.165}, [2]={.205,.405,.120},
+  [3]={.125,.300,.080}, [4]={.070,.205,.055},
+}
+-- Only non-green pixels of the authored large-tree tiles are folded into this
+-- foliage family. Existing green palette work and near-black outline pixels
+-- pass through untouched; pale sparkle and tan fallback blocks do not.
+local FOREST_FOLIAGE = {
+  [1]={.315,.515,.180}, [2]={.205,.405,.115},
+  [3]={.115,.285,.070}, [4]={.040,.115,.040},
+}
+-- Safety palette for a partial stump drawing that cannot be handed to the
+-- boulder mesh. It preserves the source pixel silhouette while making the
+-- fallback damp stone rather than white-and-orange timber.
+local FOREST_STONE = {
+  [1]={.390,.385,.315}, [2]={.285,.300,.230},
+  [3]={.170,.205,.145}, [4]={.070,.095,.070},
+}
 local COURT = {
   dark={.38,.34,.27,1}, shadow={.50,.46,.37,1},
   body={.64,.59,.48,1}, light={.74,.69,.57,1},
@@ -513,24 +643,47 @@ local function communityKey()
   return table.concat({
     CommunityVisuals.grass:get(), CommunityVisuals.roads:get(),
     CommunityVisuals.walls:get(), CommunityVisuals.courtyards:get(),
-    CommunityVisuals.wallColor(),
+    CommunityVisuals.wallColor(), CommunityVisuals.caves:get(),
+    CommunityVisuals.forest:get(), CommunityVisuals.tower:get(),
+    CommunityVisuals.towerWallStyle(),
   }, ":")
 end
 
 local function communityAtlas(map, colors, base, baked)
   local tilesetId = map.tileset and map.tileset.id
+  local mapId = tostring(map.id or ""):upper()
   local cave = tilesetId == "CAVERN"
-  local enabled = CommunityVisuals.customGrass()
+  local lavenderGround = tilesetId == "OVERWORLD"
+    and mapId == "LAVENDER_TOWN"
+  local towerInterior = tilesetId == "CEMETERY"
+    and mapId:match("^POKEMON_TOWER_[1-7]F$") ~= nil
+    and CommunityVisuals.customTower()
+  local overworldEnabled = CommunityVisuals.customGrass()
     or CommunityVisuals.customRoads() or CommunityVisuals.customWalls()
     or CommunityVisuals.customCourtyards()
-  if not cave and (not enabled or tilesetId ~= "OVERWORLD") then
+  local forestEnabled = tilesetId == "FOREST"
+    and tostring(map.id or "") == "VIRIDIAN_FOREST"
+    and CommunityVisuals.customForest()
+  -- Cave materials used to bypass every community-visual switch. Keep the
+  -- original atlas untouched unless the dedicated CAVES row is opted in.
+  if cave and not CommunityVisuals.customCaves() then return base, baked end
+  if not cave and tilesetId == "OVERWORLD"
+      and not overworldEnabled and not lavenderGround then
+    return base, baked
+  end
+  if not cave and tilesetId ~= "OVERWORLD"
+      and not forestEnabled and not towerInterior then
     return base, baked
   end
   if not (love.image and love.image.newImageData and love.graphics
           and love.graphics.newImage) then return base, baked end
 
-  local perMap = map.renderer and map.renderer.gbcAtlas and map.id or ""
-  local key = map.tileset.image .. "#community-test36-warm-brick-rough-cap#" .. communityKey()
+  -- Lavender changes shared OVERWORLD donors only for one map, so its map id
+  -- must enter the atlas identity even when the renderer uses the base atlas.
+  local perMap = (lavenderGround or towerInterior
+      or (map.renderer and map.renderer.gbcAtlas))
+    and tostring(map.id or "") or ""
+  local key = map.tileset.image .. "#community-test137-tower-master-wall-options#" .. communityKey()
     .. "#" .. paletteKey(colors or {}) .. perMap
   local held = community[key]
   if held then return held.image, held.data end
@@ -539,7 +692,15 @@ local function communityAtlas(map, colors, base, baked)
 
   local ok, entry = pcall(function()
     local w, h = src:getDimensions()
-    local data = love.image.newImageData(w, h)
+    -- Pack wall + counter across the first row and floor beneath the wall.
+    -- A horizontal 2048+1024+2048 row would exceed the conservative 4096px
+    -- texture edge supported by some Android GPUs; this layout is 3200x4096
+    -- with the normal 128px Cemetery source atlas.
+    local outW = towerInterior and
+      (w + TOWER_WALL_SIZE + TOWER_COUNTER_SIZE) or w
+    local outH = towerInterior and
+      math.max(h, TOWER_WALL_SIZE + TOWER_FLOOR_SIZE) or h
+    local data = love.image.newImageData(outW, outH)
     data:paste(src, 0, 0, 0, 0, w, h)
     local perRow = map.tileset.tilesPerRow or 16
     local total = (w / 8) * (h / 8)
@@ -615,7 +776,7 @@ local function communityAtlas(map, colors, base, baked)
       paint(2, CAVE_WALL_ART[1], CAVE_ROCK)
     end
 
-    if not cave and CommunityVisuals.customWalls() then
+    if tilesetId == "OVERWORLD" and CommunityVisuals.customWalls() then
       local shapes = V.require("TileShape").forMap(map)
       local masonry = MATERIAL[CommunityVisuals.wallColor()] or MATERIAL.granite
       for tile = 0, total - 1 do
@@ -626,12 +787,12 @@ local function communityAtlas(map, colors, base, baked)
       paint(13, ROCK_ART, masonry)
     end
 
-    if not cave and CommunityVisuals.customRoads() then
+    if tilesetId == "OVERWORLD" and CommunityVisuals.customRoads() then
       paint(57, PATH_ART, PATH)
       paint(60, WOOD_ART, WOOD)
     end
 
-    if not cave and CommunityVisuals.customCourtyards() then
+    if tilesetId == "OVERWORLD" and CommunityVisuals.customCourtyards() then
       -- The connected fence samples the same full TEST435 timber tile as the
       -- bridge. Keep that material available even when ROADS & BRIDGES stays
       -- on Battle Art; TEST2's four flat swatches produced the plain tan fence.
@@ -641,7 +802,7 @@ local function communityAtlas(map, colors, base, baked)
       paint(91, COURT_ART, COURT)
     end
 
-    if not cave and CommunityVisuals.customGrass() then
+    if tilesetId == "OVERWORLD" and CommunityVisuals.customGrass() then
       paint(44, GRASS_ART, GRASS)
       local tall = map.tileset.grassTile
       if type(tall) == "number" then tall = math.floor(tall) end
@@ -660,6 +821,161 @@ local function communityAtlas(map, colors, base, baked)
             end
           end
         end)
+      end
+    end
+
+    if lavenderGround then
+      -- $23/$39 are the paired road family and $2C is ordinary turf. Paint
+      -- all three alike because ChunkMesher routes their flat tops through
+      -- the same donor in Lavender; collision and source tiles stay intact.
+      paint(35, LAVENDER_GROUND_ART, LAVENDER_GROUND)
+      paint(44, LAVENDER_GROUND_ART, LAVENDER_GROUND)
+      paint(57, LAVENDER_GROUND_ART, LAVENDER_GROUND)
+    end
+
+    if towerInterior then
+      local okRaw, raw = pcall(Assets.imageData, map.tileset.image)
+      if not okRaw then raw = nil end
+
+      -- All full materials live beside the original tiles, never over them.
+      -- Walls match the new smoky slab reference, the approved TEST123 black
+      -- granite remains isolated on the counter, and the floor stays a quiet
+      -- materially distinct honed stone at double resolution.
+      local wallStyle = CommunityVisuals.towerWallStyle()
+      local wallPath = TOWER_WALL_PATHS[wallStyle]
+        or TOWER_WALL_PATHS.smoke_black
+      local wall = Assets.imageData(wallPath)
+      local ww, wh = wall:getDimensions()
+      if ww ~= TOWER_WALL_SIZE or wh ~= TOWER_WALL_SIZE then
+        error("Pokemon Tower wall texture must be 2048x2048")
+      end
+      data:paste(wall, w, 0, 0, 0, TOWER_WALL_SIZE, TOWER_WALL_SIZE)
+
+      local counter = Assets.imageData(TOWER_COUNTER_PATH)
+      local cw, ch = counter:getDimensions()
+      if cw ~= TOWER_COUNTER_SIZE or ch ~= TOWER_COUNTER_SIZE then
+        error("Pokemon Tower counter texture must be 1024x1024")
+      end
+      data:paste(counter, w + TOWER_WALL_SIZE, 0, 0, 0,
+                 TOWER_COUNTER_SIZE, TOWER_COUNTER_SIZE)
+
+      local counterTop = Assets.imageData(TOWER_COUNTER_TOP_PATH)
+      local ctw, cth = counterTop:getDimensions()
+      if ctw ~= TOWER_COUNTER_SIZE or cth ~= TOWER_COUNTER_SIZE then
+        error("Pokemon Tower counter-top texture must be 1024x1024")
+      end
+      -- The last 1024px slot in the mobile-safe atlas column was unused.
+      -- Keep the approved dark granite on the counter body and reserve this
+      -- separate pearl quartz sheet for the upward-facing slab only.
+      data:paste(counterTop, w + TOWER_WALL_SIZE, 3072,
+                 0, 0, TOWER_COUNTER_SIZE, TOWER_COUNTER_SIZE)
+
+      local floor = Assets.imageData(TOWER_FLOOR_PATH)
+      local fw, fh = floor:getDimensions()
+      if fw ~= TOWER_FLOOR_SIZE or fh ~= TOWER_FLOOR_SIZE then
+        error("Pokemon Tower floor texture must be 2048x2048")
+      end
+      data:paste(floor, w, TOWER_WALL_SIZE,
+                 0, 0, TOWER_FLOOR_SIZE, TOWER_FLOOR_SIZE)
+
+      -- The counter occupies the top of the final 1024px atlas column. Reuse
+      -- its otherwise empty lower bands for full-resolution stair and grave
+      -- materials without increasing the 3200x4096 mobile-safe atlas edge.
+      local stair = Assets.imageData(TOWER_STAIR_PATH)
+      local sw, sh = stair:getDimensions()
+      if sw ~= TOWER_DETAIL_SIZE or sh ~= TOWER_DETAIL_SIZE then
+        error("Pokemon Tower stair texture must be 1024x1024")
+      end
+      data:paste(stair, w + TOWER_WALL_SIZE, TOWER_COUNTER_SIZE,
+                 0, 0, TOWER_DETAIL_SIZE, TOWER_DETAIL_SIZE)
+
+      local grave = Assets.imageData(TOWER_GRAVE_PATH)
+      local gw, gh = grave:getDimensions()
+      if gw ~= TOWER_DETAIL_SIZE or gh ~= TOWER_DETAIL_SIZE then
+        error("Pokemon Tower grave texture must be 1024x1024")
+      end
+      data:paste(grave, w + TOWER_WALL_SIZE, TOWER_WALL_SIZE,
+                 0, 0, TOWER_DETAIL_SIZE, TOWER_DETAIL_SIZE)
+
+      -- Main walkable floor donor. ChunkMesher also routes the 5F healing
+      -- zone ($22) through this material with a lighter stone tone, retaining
+      -- the landmark without leaking the original vivid-blue tile in battle.
+      paint(1, TOWER_FLOOR_ART, TOWER_FLOOR)
+
+      -- Chamber ring and solid backing: preserve every arch, trim line and
+      -- doorway pixel while translating the palette into cool grey granite.
+      for _, tile in ipairs({9, 10, 25, 26, 32, 48}) do
+        recolor(tile, TOWER_STONE, raw)
+      end
+      -- Tile $11 is the wall mass and TEST115's atlas-safe granite swatch.
+      -- Its first row contains the exact dark/shadow/body/light samples used
+      -- by ChunkMesher's raised stones, piers and cap courses.
+      paint(17, ROCK_ART, TOWER_MASONRY)
+
+      -- Existing per-cell 3D headstones keep their silhouettes and spacing;
+      -- the cooler stone palette separates them from the warmer wall ring.
+      for _, tile in ipairs({5, 6, 21, 22}) do
+        recolor(tile, TOWER_GRAVE, raw)
+      end
+
+      -- The reception counter is stone in the supplied room reference. Its
+      -- live voxel surfaces use ChunkMesher's continuous granite field; this
+      -- matching atlas palette also covers any fallback face.
+      for _, tile in ipairs({2, 18, 29, 30}) do
+        recolor(tile, TOWER_COUNTER, raw)
+      end
+
+      -- Both stair drawings retain their restrained aged metal/wood tones.
+      for _, tile in ipairs({3, 4, 19, 20, 11, 12, 27, 28}) do
+        recolor(tile, TOWER_FIXTURE, raw)
+      end
+    end
+
+    local function forestize(tile, raw)
+      if type(tile) ~= "number" or tile < 0 or tile >= total or not raw then
+        return
+      end
+      local ox, oy = (tile % perRow) * 8, math.floor(tile / perRow) * 8
+      for py = 0, 7 do
+        for px = 0, 7 do
+          local r, g, b, alpha = data:getPixel(ox + px, oy + py)
+          local brightest = math.max(r, g, b)
+          local alreadyGreen = g >= r * 1.08 and g >= b * 1.12
+          if alpha > 0 and brightest > .14 and not alreadyGreen then
+            local shade = shadeOf(raw:getPixel(ox + px, oy + py))
+            local c = FOREST_FOLIAGE[shade]
+            data:setPixel(ox + px, oy + py, c[1], c[2], c[3], alpha)
+          end
+        end
+      end
+    end
+
+    if forestEnabled then
+      local shapes = V.require("TileShape").forMap(map)
+      local okRaw, raw = pcall(Assets.imageData, map.tileset.image)
+      if not okRaw then raw = nil end
+      for tile = 0, total - 1 do
+        local shape = shapes[tile]
+        if shape and shape.class == "ground" then
+          local variant = (tile % #FOREST_GROUND_ART) + 1
+          paint(tile, FOREST_GROUND_ART[variant], FOREST_GROUND)
+        elseif shape and (shape.class == "canopy"
+                           or shape.class == "cylinder") then
+          -- TEST97: retain the accepted tree palette, but neutralize the
+          -- pale/tan source pixels that became suspended checker cubes when
+          -- the same group was viewed from underneath or across the map edge.
+          forestize(tile, raw)
+        elseif shape and shape.class == "stump" then
+          recolor(tile, FOREST_STONE, raw)
+        end
+      end
+      -- Preserve the authored standing-grass silhouette used by both the
+      -- terrain and Structures' blades; only fold it into the quieter forest
+      -- palette so encounter patches no longer sit on neon checkerboards.
+      local tall = map.tileset.grassTile
+      if type(tall) == "number" then tall = math.floor(tall) end
+      if type(tall) == "number" and tall >= 0 and tall < total then
+        if raw then recolor(tall, FOREST_TALL_GRASS, raw) end
       end
     end
 
@@ -914,7 +1230,8 @@ function TerrainAtlas.animate(map, colors, base, baked)
   -- exist at all.
   local perMap = map.renderer and map.renderer.gbcAtlas and map.id or nil
   local caveMaterial = map.tileset and map.tileset.id == "CAVERN"
-    and "#test36-warm-brick-rough-cap" or ""
+    and CommunityVisuals.customCaves()
+    and "#legendary-natural-cave" or ""
   local key = map.tileset.image .. "#a#" .. paletteKey(colors or {})
     .. "#community#" .. communityKey() .. caveMaterial .. (perMap or "") .. ((map.id or ""):match("^SAFARI_ZONE_") and ("#safari#"..map.id) or "")
   local entry = animated[key]

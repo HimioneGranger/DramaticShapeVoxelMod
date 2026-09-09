@@ -26,7 +26,10 @@ love = { graphics = { newMesh = function() end }, data = {
   newByteData = function() end,
 } }
 local Disk = assert(loadfile(root .. "/lib/VoxelMeshDisk.lua"))({
-  require = function() return { check = function() end } end,
+  require = function(name)
+    if name == 'LoadTimings' then return {wrap = function(_, fn) return fn end} end
+    return { check = function() end }
+  end,
 })
 Disk.staticEligible = function() return true end
 Disk.fingerprint = function(map, slot) return map.id .. ":" .. slot end

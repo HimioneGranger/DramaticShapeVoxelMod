@@ -57,6 +57,7 @@
 local V = ...
 
 local DayNight = V.require("DayNight")
+local CommunityVisuals = V.require("CommunityVisuals")
 local PaletteFX = require("src.render.PaletteFX")
 
 local Sky = {}
@@ -110,6 +111,25 @@ local cache = { bands = nil, key = {}, ramp = nil }
 function Sky.bands()
   local pal = DayNight.palette()
   local shades = PaletteFX.effectiveColors(pal) or pal
+  -- TEST56 Legendary Night: Battle Art's scene pass made the donor nighttime
+  -- palette read too close to daytime blue. Deepen only the opted-in
+  -- Legendary sky and blend smoothly through violet twilight; daytime and
+  -- Battle Art's original sky remain unchanged.
+  local nightWeight = 0
+  if CommunityVisuals.customSky() then
+    local mix = DayNight.mix(DayNight.time())
+    nightWeight = math.min(1, (mix.night or 0) + (mix.violet or 0) * 0.65)
+  end
+  local adjusted = {}
+  local nightScale = { 0.45, 0.52, 0.66 }
+  for i, c in ipairs(shades) do
+    adjusted[i] = {}
+    for ch = 1, 3 do
+      local scale = 1 - nightWeight + nightWeight * nightScale[ch]
+      adjusted[i][ch] = math.floor(c[ch] * scale / 8 + 0.5) * 8
+    end
+  end
+  shades = adjusted
   local n = math.min(#shades, #pal, Sky.MAX_BANDS)
   local key, k = cache.key, 0
   local same = cache.bands ~= nil and #cache.bands == n

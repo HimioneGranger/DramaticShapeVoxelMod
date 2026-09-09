@@ -2969,6 +2969,22 @@ return {
   -- Per-map additions to a shared tileset profile. Oak's Lab shares DOJO
   -- with the Fighting Dojo and Lance's room; these pins must not alter either.
   maps = {
+    -- TEST114: Pokémon Tower's perimeter is a real mausoleum wall, not the
+    -- original single 16px decorative course. The override is deliberately
+    -- map-scoped so Agatha's room, which shares CEMETERY, stays untouched.
+    -- Geometry only: collision, warps, NPCs and object placement still come
+    -- from the ROM map.
+    -- TEST121 adds a fourth visible course. The supplied reference has a tall,
+    -- imposing burial hall whose pillars continue well above the torches; 48px
+    -- left the room looking cropped. Collision, warps and movement remain on
+    -- their authored map cells -- only the visible perimeter rises to 64px.
+    POKEMON_TOWER_1F = { heights = { wall = 64 } },
+    POKEMON_TOWER_2F = { heights = { wall = 64 } },
+    POKEMON_TOWER_3F = { heights = { wall = 64 } },
+    POKEMON_TOWER_4F = { heights = { wall = 64 } },
+    POKEMON_TOWER_5F = { heights = { wall = 64 } },
+    POKEMON_TOWER_6F = { heights = { wall = 64 } },
+    POKEMON_TOWER_7F = { heights = { wall = 64 } },
     -- Only the full-cell LAB stools appear in these rooms. Other LAB
     -- rooms retain their existing eight-pixel bench-stool support.
     FUCHSIA_MEETING_ROOM = { heights = { stool = 6 } },

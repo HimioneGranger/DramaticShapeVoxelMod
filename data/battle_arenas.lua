@@ -145,7 +145,13 @@ return {
   -- gym's barrier, so arenas there silently fail the fit test
   ["VERMILION_GYM"] = { x = 4, y = 11, shape = "narrow" },
   ["VICTORY_ROAD_1F"] = { x = 11, y = 2, shape = "narrow" },
-  ["VIRIDIAN_FOREST"] = { x = 16, y = 34, shape = "narrow" },
+  -- Keep TEST102's proven long-lens composition, but do not import an unsafe
+  -- free-roam attitude and do not let manual movement carry the eye back
+  -- through the expanded Legendary tree crowns.
+  ["VIRIDIAN_FOREST"] = {
+    x = 16, y = 34, shape = "narrow",
+    cameraSafe = true, orbitCap = 0.12, pitchCap = 0.35,
+  },
 
   -- ------- the remaining routes
   ["ROUTE_19"] = { x = 8, y = 6, shape = "narrow" },

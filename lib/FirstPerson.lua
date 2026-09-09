@@ -668,9 +668,19 @@ end
 -- covers the ground THIS camera sees. The push is strongest looking
 -- south (the direction the orbit's box barely reaches) and scales with
 -- the blend.
+--
+-- TEST120 keeps the THIRD-PERSON box planted at the player's world centre.
+-- Its boom already has enough coverage inside fit()'s caster/view margins,
+-- while sliding this centre continuously with yaw reprojected the entire
+-- finite shadow texture across otherwise stationary walls and floors. That
+-- produced the observed whole-scene shimmer only while looking side to side;
+-- pitch redrew the same box in place and therefore stayed clean. First person
+-- retains the directional push because its eye can look all the way to the
+-- far horizon without the boom's framing limits.
 function FirstPerson.shadowCenter(sx, sy, vh)
   local e = FirstPerson.cardBlend()
   if e <= 0 then return sx, sy end
+  if ThirdPerson.extended() then return sx, sy end
   local fx, fz = FirstPerson.lookFlat()
   local ShadowMap = V.require("ShadowMap")
   local cap = (ShadowMap.FAR_CAP or 2.5) * vh

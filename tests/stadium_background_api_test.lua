@@ -64,7 +64,10 @@ local mod={
   events={on=function() end},
 }
 local V={mod=mod}
-function V.require(name) return assert(modules[name],name) end
+function V.require(name)
+  if name == 'BattleCam' then return {} end
+  return assert(modules[name],name)
+end
 
 local provider=assert(loadfile("lib/StadiumBackground.lua"))(V)
 ok(provider.install(),"registers against Stadium scene API v1")

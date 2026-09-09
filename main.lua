@@ -121,6 +121,8 @@ local VoxelCompanion = V.require("VoxelCompanion")
 local CompanionLifecycle = V.require("CompanionLifecycle")
 local CharacterRenderers = V.require("CharacterRenderers")
 local CommunityVisuals = V.require("CommunityVisuals")
+local ForestAtmos = V.require("ForestAtmos")
+local TowerFogSettings = V.require("TowerFogSettings")
 
 -- The public provider is created while this mod loads, before consumers resolve
 -- optional dependencies. The dispatcher starts at mods.loaded; a consumer that
@@ -355,6 +357,9 @@ mod.content.render_pipelines:register("voxel", {
     -- battles and menus, and a CYCLE evening falls mid-fight exactly as it
     -- would mid-walk
     DayNight.update(dt)
+    -- Viridian's leaf shimmer, haze and optional volumetric pass use their
+    -- own clock so animations continue smoothly through dialogue and battles.
+    ForestAtmos.update(dt)
     -- The overworld battle rides this hook rather than owning a pipeline of
     -- its own, because it owns no pass of the FRAME: it draws under a battle
     -- screen the engine composites, which is not a stage the registry has.
@@ -384,11 +389,11 @@ mod.content.render_pipelines:register("voxel", {
     if ow and ow.map and ow.camera then
       -- Also covers enabling/reloading the mod after the title menu.
       VoxelMeshDisk.beginSession(ramOnly)
-      pcall(VoxelScene.prefetch, ow)
+      pcall(V.require("LoadTimings").call, "prefetch", VoxelScene.prefetch, ow)
       -- Once the visible neighbourhood is ready, cooperatively prepare the
       -- current map's real warp/connection destinations.  This is automatic:
       -- no prebuild button, startup pause or whole-world resident cache.
-      pcall(VoxelPrecache.update, Game)
+      pcall(V.require("LoadTimings").call, "prefetch", VoxelPrecache.update, Game)
     end
     ChunkMesher.pump(Game and Game.stack
                      and Game.stack:top() ~= ow)
@@ -427,7 +432,8 @@ mod.content.render_pipelines:register("voxel", {
     -- world-like state, fail open to its native renderer instead of aborting
     -- the remainder of the frame (which otherwise leaves only the naming
     -- canvas's green clear colour visible).
-    local okRender, canvas, waiting = pcall(VoxelScene.render, state, rw, rh,
+    local okRender, canvas, waiting = pcall(V.require("LoadTimings").call,
+                                            "world_other", VoxelScene.render, state, rw, rh,
                                             ctx.vw, ctx.vh, ctx.paletteFor)
     local map = state.map
     if not okRender then
@@ -656,17 +662,76 @@ local SETTINGS = {
     .. "granite, red brick, sandstone or slate. Pillars stay in their locked "
     .. "TEST366 granite material.",
     full = true },
+  { CommunityVisuals.caves,
+    "Choose Battle Art's authored cave presentation or the opt-in Legendary "
+    .. "Visuals natural cave: continuous rough rock walls and a dark granular "
+    .. "dirt path. This changes derived visuals only; collision, ladders, "
+    .. "entrances, map data and cave battle framing remain authoritative.",
+    full = true },
+  { CommunityVisuals.caveDetails,
+    "Optional cave atmosphere borrowed selectively from Kanto First Person "
+    .. "without replacing the Legendary Visuals walls. SUBTLE adds sparse "
+    .. "animated wall torches, sourced cave moisture and sparse layered rock "
+    .. "columns; FULL also permits attached hanging formations, occasional "
+    .. "dark pools, slow surface ripples and low damp haze. OFF is the "
+    .. "zero-cost default.",
+    full = true },
+  { CommunityVisuals.caveSound,
+    "Optional cave ambience and per-tile rock footsteps. LOW and MID control "
+    .. "the ambient bed volume while both retain clearly audible walking "
+    .. "effects; OFF loads and plays no added cave audio.",
+    full = true },
+  { CommunityVisuals.tower,
+    "Master switch for the Pokemon Tower conversion. BATTLE ART restores the "
+    .. "original Tower atlas, wall height, floor, counter, graves and stairs "
+    .. "and suppresses Legendary fog and detail passes. LEGENDARY VISUALS "
+    .. "restores the complete approved Tower while retaining the individual "
+    .. "detail, fog thickness and fog speed choices below.",
+    full = true },
+  { CommunityVisuals.towerWall,
+    "Choose the Pokemon Tower wall slab while Legendary Visuals is active. "
+    .. "SMOKE BLACK keeps the approved dark smoky granite; STORM WHITE adds "
+    .. "broad charcoal ribbons over cool white stone; PEARL WHITE is brighter "
+    .. "and calmer with restrained silver-grey movement. All three use the "
+    .. "same continuous 2048px wall projection.",
+    full = true },
+  { TowerFogSettings.details,
+    "Choose the Pokemon Tower detail layer independently of its materials "
+    .. "and grave fog. SUBTLE keeps the high wall sconces with steady light. "
+    .. "FULL restores the living flame motion, restrained wall flicker, "
+    .. "embers and the reception counter's brass edge.",
+    full = true },
+  { TowerFogSettings.enabled,
+    "Show or hide the connected white-grey fog banks on Pokemon Tower's "
+    .. "grave floors. Reception stays clear. OFF skips the fog texture, "
+    .. "shader and grave-zone mesh entirely when they have not been built.",
+    full = true },
+  { TowerFogSettings.thickness,
+    "Set the visible body of Pokemon Tower fog. LIGHT, NORMAL, THICK and "
+    .. "HEAVY change its opacity and bank height without spreading it into "
+    .. "reception; NORMAL is TEST134's approved look.",
+    full = true },
+  { TowerFogSettings.speed,
+    "Set the continuous drift, breathing and evaporation speed of Pokemon "
+    .. "Tower fog. Changing this live preserves the current cloud phase; "
+    .. "NORMAL is TEST134's approved motion.",
+    full = true },
   { CommunityVisuals.trees,
     "Choose Battle Art's authored round trees or the finalized Legendary Visuals "
-    .. "small, medium, large and mature XL tree family.", full = true },
+    .. "small, medium, large and mature XL tree family. LEGENDARY FAST uses "
+    .. "a visibly lighter crown with fewer leaf clumps/cards and no decorative "
+    .. "diamond shells; LEGENDARY FULL preserves the dense original canopy. "
+    .. "Tree generation and terrain transfer are budgeted for mobile frames; "
+    .. "Cut saplings never enter or rebuild mature groves.",
+    full = true },
   { CommunityVisuals.cutTrees,
     "Choose Battle Art's original cuttable bush or the super-skinny Legendary "
     .. "Visuals city sapling with two support stakes and dark ties. The "
     .. "original Cut action, collision, replacement "
     .. "block and regrowth remain authoritative.", full = true },
   { CommunityVisuals.signs,
-    "Choose Battle Art's readable white town sign or add the Legendary "
-    .. "Visuals grained wooden frame behind that same authored face and label.",
+    "Choose Battle Art's readable white sign or the Legendary Visuals low "
+    .. "Kanto wayfinder with live location labels, including Viridian Forest.",
     full = true },
   { CommunityVisuals.grass,
     "Choose the original Overworld turf and encounter grass or TEST435's "
@@ -680,6 +745,23 @@ local SETTINGS = {
   { CommunityVisuals.courtyards,
     "Choose original courtyard/fence treatment or TEST435's timber fences, "
     .. "warm flagstone courts and flush claimed-cell finish.", full = true },
+  { CommunityVisuals.sky,
+    "Choose Battle Art's original clear horizon or Legendary Visuals' "
+    .. "seamless sky, deep night, emissive animated stars, low-poly painted "
+    .. "mountains and distant Kanto terrain. "
+    .. "The approved external Weather FX cloud layer remains authoritative.",
+    full = true },
+  { CommunityVisuals.forest,
+    "Choose Battle Art's original Viridian presentation or the approved "
+    .. "Legendary Visuals authored taller tree layout, stitched canopy, layered "
+    .. "forest depth, map-authored haze, animated leaves, varied moss-and-litter "
+    .. "floor, camera-stable crossed grass and mossy fieldstone boulders. The "
+    .. "separate TREES row controls the swaying Legendary tree family.", full = true },
+  { ForestAtmos.setting,
+    "LOW enables the approved Viridian Forest haze and guarded depth-aware "
+    .. "light shafts. OFF removes that atmosphere pass while leaving the "
+    .. "Legendary forest geometry and falling leaves untouched.",
+    full = true },
   { VoxelGrid.setting,
     "One-pixel wireframe along every voxel edge." },
   { WorldCurve.setting,
@@ -1020,16 +1102,55 @@ local HOTKEYS = {
   ["9"] = Water.setting,
 }
 
--- The latest engine can drive fixed-row OPTIONS submenus. Sort this mod's
--- settings into a few small pages there; engines before that screen contract
--- retain the original flat list, including v0.2.36.
-local OPTION_CATEGORIES = {
-  { id = "world", label = "WORLD", settings = {
+-- The latest engine can drive fixed-row OPTIONS submenus. TEST135 collects
+-- every Legendary visual choice behind one top-level entry, then divides it
+-- into focused pages. Engines before that screen contract retain the original
+-- flat list, including v0.2.36; the mod manager schema also remains flat.
+local LEGENDARY_ROOT = {
+  id = "legendary_visuals", label = "LEGENDARY VISUALS",
+}
+
+local LEGENDARY_CATEGORIES = {
+  { id = "legendary_tower", label = "POKEMON TOWER", settings = {
+    CommunityVisuals.tower, CommunityVisuals.towerWall,
+    TowerFogSettings.details, TowerFogSettings.enabled,
+    TowerFogSettings.thickness,
+    TowerFogSettings.speed,
+  } },
+  { id = "legendary_caves", label = "CAVES", settings = {
+    CommunityVisuals.caves, CommunityVisuals.caveDetails,
+    CommunityVisuals.caveSound,
+  } },
+  { id = "legendary_pillars", label = "PILLARS & MASONRY", settings = {
     CommunityVisuals.pillars, CommunityVisuals.masonry,
-    CommunityVisuals.trees, CommunityVisuals.cutTrees,
-    CommunityVisuals.signs, CommunityVisuals.grass,
+  } },
+  { id = "legendary_signs", label = "SIGNS & PROPS", settings = {
+    CommunityVisuals.signs, CommunityVisuals.cutTrees,
+  } },
+  { id = "legendary_nature", label = "GRASS & TREES", settings = {
+    CommunityVisuals.grass, CommunityVisuals.trees,
+    CommunityVisuals.forest, ForestAtmos.setting,
+  } },
+  { id = "legendary_structures", label = "ROADS & STRUCTURES", settings = {
     CommunityVisuals.roads, CommunityVisuals.walls,
     CommunityVisuals.courtyards,
+  } },
+  { id = "legendary_sky", label = "SKY & BACKGROUND", settings = {
+    CommunityVisuals.sky,
+  } },
+  { id = "legendary_battle", label = "BATTLE PRESENTATION", settings = {
+    OverworldBattle.trainerBattleSetting,
+    PokeballSettings.enabled, PokeballSettings.size,
+    PokeballSettings.suction, PokeballSettings.preset,
+    PokeballSettings.beam, PokeballSettings.streamers,
+    PokeballSettings.stars, PokeballSettings.pokemonGlow,
+    PokeballSettings.suctionParticles, PokeballSettings.captureSpeed,
+    PokeballSettings.openTime, PokeballSettings.fxScale,
+  } },
+}
+
+local OPTION_CATEGORIES = {
+  { id = "world", label = "WORLD", settings = {
     VoxelGrid.setting, WorldCurve.setting, WorldUnderlay.setting,
     Water.setting, DayNight.setting, FirstPerson.invertYSetting,
   } },
@@ -1046,14 +1167,7 @@ local OPTION_CATEGORIES = {
     BattleArt.frontFlipSetting,
   } },
   { id = "battle", label = "BATTLE SCENE", settings = {
-    OverworldBattle.setting, OverworldBattle.trainerBattleSetting,
-    OverworldBattle.hudScaleSetting,
-    PokeballSettings.enabled, PokeballSettings.size,
-    PokeballSettings.suction, PokeballSettings.preset,
-    PokeballSettings.beam, PokeballSettings.streamers,
-    PokeballSettings.stars, PokeballSettings.pokemonGlow,
-    PokeballSettings.suctionParticles, PokeballSettings.captureSpeed,
-    PokeballSettings.openTime, PokeballSettings.fxScale,
+    OverworldBattle.setting, OverworldBattle.hudScaleSetting,
     BattleArt.backPlacementSetting,
     UiBackplates.spriteLight, UiBackplates.battleUi,
     UiBackplates.hudColor, UiBackplates.arenaFill,
@@ -1062,8 +1176,16 @@ local OPTION_CATEGORIES = {
   } },
 }
 
-local OPTION_CATEGORY = {}
+local ALL_OPTION_CATEGORIES = {}
+for _, category in ipairs(LEGENDARY_CATEGORIES) do
+  ALL_OPTION_CATEGORIES[#ALL_OPTION_CATEGORIES + 1] = category
+end
 for _, category in ipairs(OPTION_CATEGORIES) do
+  ALL_OPTION_CATEGORIES[#ALL_OPTION_CATEGORIES + 1] = category
+end
+
+local OPTION_CATEGORY = {}
+for _, category in ipairs(ALL_OPTION_CATEGORIES) do
   for _, setting in ipairs(category.settings) do
     OPTION_CATEGORY[setting] = category
   end
@@ -1089,9 +1211,20 @@ local function categorizedOptionsAvailable()
   return false
 end
 
+local function findOptionGroup(rows, id)
+  for _, row in ipairs(rows or {}) do
+    if type(row) == "table" then
+      if row.id == id then return row end
+      local nested = row.members and findOptionGroup(row.members, id)
+      if nested then return nested end
+    end
+  end
+  return nil
+end
+
 local function categorizedRows(rows)
   local buckets = {}
-  for _, category in ipairs(OPTION_CATEGORIES) do buckets[category] = {} end
+  for _, category in ipairs(ALL_OPTION_CATEGORIES) do buckets[category] = {} end
   local uncategorized = {}
   for _, row in ipairs(rows) do
     local category = row.optionSetting and OPTION_CATEGORY[row.optionSetting]
@@ -1105,13 +1238,32 @@ local function categorizedRows(rows)
     local id = "BATTLE_ART_VOXEL_FORK:group:" .. category.id
     return {
       id = id, label = category.label, group = true, members = members,
-      value = function() return ("%d OPTIONS"):format(#members) end,
+      -- Conditional rows can change while a parent page remains on the stack;
+      -- OPEN stays truthful while activation resolves the fresh member list.
+      value = function() return "OPEN" end,
       activate = function(game)
-        local sub = OptionsMenu.new(game, { rows = members })
+        -- Parent menus stay on the stack while a child is open. Resolve this
+        -- page again at activation time so a parent snapshot cannot hide rows
+        -- that became available after enabling 3D battles, Legendary balls,
+        -- or the CUSTOM effects preset in a sibling/child page.
+        local fresh = OptionsMenu.new(game)
+        local group = findOptionGroup(fresh.view or fresh.rows, id)
+        local current = (group and group.members) or members
+        local sub = OptionsMenu.new(game, { rows = current })
         sub.dramaticShapeCategory = id
         game.stack:push(sub)
       end,
     }
+  end
+  local legendary = {}
+  for _, category in ipairs(LEGENDARY_CATEGORIES) do
+    local members = buckets[category]
+    if #members > 0 then
+      legendary[#legendary + 1] = opener(category, members)
+    end
+  end
+  if #legendary > 0 then
+    out[#out + 1] = opener(LEGENDARY_ROOT, legendary)
   end
   for _, category in ipairs(OPTION_CATEGORIES) do
     local members = buckets[category]
@@ -1544,6 +1696,18 @@ end)
 -- out-of-bounds write, and a stamp that rewrites a block with the value
 -- it already held (the door code guards for this, the regrowth does not)
 -- is not a change and must not throw the mesh away.
+--
+-- TEST97: Legendary Cut saplings are a special safe exception. Their source
+-- crown is already absent from the terrain mesh and the exposed ground is
+-- already baked beneath it; only CommunityFlora's tiny replacement mesh must
+-- disappear. Remove that one registry owner directly for a confirmed forward
+-- cut-tree swap. TEST105 also restores the saved owner on regrowth while the
+-- same map, registries and completed meshes remain valid. Doors, rocks, tall
+-- grass, and any regrowth without that proof retain the full refresh path.
+local function isolateCommunityCut(map, bx, by, before, after)
+  return V.require("SaplingEdits").apply(map, bx, by, before, after)
+end
+
 do
   local Map = require("src.world.Map")
   if not Map.dramaticShapeBlockHook then
@@ -1551,11 +1715,14 @@ do
     Map.setBlock = function(self, bx, by, block)
       local before = self:blockAt(bx, by)
       setBlock(self, bx, by, block)
-      if self.id and self:blockAt(bx, by) ~= before then
-        -- naming the block lets the mesher drop what stood there from the
-        -- mesh on screen, so a cut tree goes on this frame
-        ChunkMesher.refresh(self.id, bx, by, self, before)
-        Companion:worldChanged("map.setBlock")
+      local after = self:blockAt(bx, by)
+      if self.id and after ~= before then
+        if isolateCommunityCut(self, bx, by, before, after) then
+          Companion:worldChanged("map.setBlock.cut")
+        else
+          ChunkMesher.refresh(self.id, bx, by, self, before)
+          Companion:worldChanged("map.setBlock")
+        end
       end
     end
     Map.dramaticShapeBlockHook = true
@@ -1654,6 +1821,8 @@ do
       local before = Pipelines.level("voxel")
       local hadBattles = OverworldBattle.enabled()
       local hadBattleArt = BattleArt.setting:get()
+      local hadPokeballs = PokeballSettings.active()
+      local hadPokeballPreset = PokeballSettings.preset:get()
       local wasOn = idAt(self, self.index)
       inner(self, dt)
       BattleArt.forceRomPlayer(self.game)
@@ -1662,17 +1831,14 @@ do
                           and (Voxel.isFull(before) or Voxel.isFull(after))
       local hasBattleArt = BattleArt.setting:get()
       if crossedFull or OverworldBattle.enabled() ~= hadBattles
-         or hasBattleArt ~= hadBattleArt then
+         or hasBattleArt ~= hadBattleArt
+         or PokeballSettings.active() ~= hadPokeballs
+         or PokeballSettings.preset:get() ~= hadPokeballPreset then
         local rebuilt = OptionsMenu.new(self.game)
         if self.dramaticShapeCategory then
-          local members = nil
-          for _, row in ipairs(rebuilt.view or rebuilt.rows or {}) do
-            if row.id == self.dramaticShapeCategory then
-              members = row.members
-              break
-            end
-          end
-          self.rows = members or {}
+          local group = findOptionGroup(rebuilt.view or rebuilt.rows,
+                                        self.dramaticShapeCategory)
+          self.rows = (group and group.members) or {}
           self.view = self.rows
         else
           self.rows = rebuilt.rows
@@ -1918,3 +2084,7 @@ mod.exports.characterRenderers = CharacterRenderers.export()
 -- exposed so a companion mod can pin its own tiles' shapes or read the
 -- camera without reaching into this mod's file layout
 mod.exports.lib = V
+
+-- TEST103 measures the live scene at its call sites: Stadium's later source
+-- rebuild cannot detach the probes, and actor-provider upvalues stay visible.
+V.require("LoadTimings").install(mod)

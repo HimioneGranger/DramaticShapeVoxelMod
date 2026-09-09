@@ -153,6 +153,7 @@ ShadowMap._source = function() return SHADER end   -- named for the suite
 local shader = nil            -- nil = untried, false = unavailable
 local canvas = nil            -- nil = untried, false = unavailable
 local canvasRes = 0           -- the edge `canvas` was made at
+local canvasAllocations = 0
 local blank = nil             -- 1x1 stand-in so the sampler is never unbound
 local drawing = false
 local ready = false
@@ -241,6 +242,7 @@ local function getCanvas(res)
   pcall(c.setWrap, c, "clamp", "clamp")
   if canvas and canvas.release then pcall(canvas.release, canvas) end
   canvas, canvasRes = c, res
+  canvasAllocations = canvasAllocations + 1
   ready = false
   return canvas
 end
@@ -317,9 +319,20 @@ function ShadowMap.available()
           and love.graphics.setDepthMode) then
     return false
   end
-  -- the smallest rung is enough to answer the question; fit() picks the
-  -- one this frame actually wants
-  return getShader() ~= nil and getCanvas(ShadowMap.SIZES[1]) ~= nil
+  if not getShader() then return false end
+  -- TEST104: this is a capability check, not a resize request. Asking for
+  -- the smallest rung here discarded a live 1536/2048 target; begin() then
+  -- allocated the larger one again on the same frame. Keep any live target
+  -- and its ready/signature state. Only begin() selects a new resolution.
+  if canvas ~= nil then return canvas ~= false end
+  return getCanvas(ShadowMap.SIZES[1]) ~= nil
+end
+
+-- Session counters let the timing panel distinguish a real resize from
+-- repeated capability checks. Reading these never creates a GPU object.
+function ShadowMap.stats()
+  return { allocations = canvasAllocations, size = canvasRes,
+           active = ready and canvas ~= nil and canvas ~= false }
 end
 
 -- The map to sample, or the blank stand-in. Never nil once the main pass
