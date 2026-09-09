@@ -68,7 +68,14 @@ $worldFill = @(Get-ChildItem -LiteralPath (Join-Path $repo 'assets\world-fill') 
     $relative = Relative-Path $_.FullName
     if (-not (Test-ExcludedFolder $relative)) { $relative }
   })
-$files = @($source + $contracts + $localArt + $worldFill | Sort-Object -Unique)
+# Legendary assets: Pokemon Tower wall/floor/counter textures, cave audio,
+# and backdrop images. These are committed public art (not BYO) and must ship
+# in the package or the tower interior renders with missing textures.
+$legendary = @(Get-ChildItem -LiteralPath (Join-Path $repo 'assets\legendary') `
+  -Recurse -File -ErrorAction SilentlyContinue | Where-Object {
+    -not (Test-ExcludedFolder (Relative-Path $_.FullName))
+  } | ForEach-Object { Relative-Path $_.FullName })
+$files = @($source + $contracts + $localArt + $worldFill + $legendary | Sort-Object -Unique)
 if (-not $files.Count) { throw "no package files found" }
 
 if (Test-Path -LiteralPath $Output) { Remove-Item -LiteralPath $Output -Force }
