@@ -517,9 +517,11 @@ function Disk.fingerprint(map, slot, masks, kind)
   end
   parts[#parts + 1] = CommunityVisuals.grass:get()
   if kind == "aux" then
-    -- TEST105 restores closed grass strokes while retaining TEST104's
-    -- camera-safe Viridian framing. Force a clean auxiliary mesh rebuild.
-    parts[#parts + 1] = "closed-tall-grass-v4-camera-safe"
+    -- TEST138 removes only exposed east tile-boundary caps while preserving
+    -- every camera-safe interior cap and crossed centre card. Force a clean
+    -- auxiliary mesh rebuild so TEST137's rigid field-edge strips cannot be
+    -- reused from disk.
+    parts[#parts + 1] = "closed-tall-grass-v5-east-edge-softened"
   end
   parts[#parts + 1] = CommunityVisuals.roads:get()
   local mapId = tostring(map.id or ""):upper()

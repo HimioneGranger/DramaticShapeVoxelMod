@@ -1,3 +1,19 @@
+# TEST138 grass-only integration — 2026-09-09
+
+Applied only the post-TEST137 grass delta from Legendary grass update onto
+`Legendary-Updates` at `bcb2f11`. The earlier cave merge is now committed there;
+its prior uncommitted status below is historical. Grass changes remain local
+and uncommitted, with no push or deployment.
+
+Structures suppresses only exposed east tile-boundary grass caps. VoxelMeshDisk
+advances the auxiliary grass fingerprint to v5; combined cache revision 37,
+release identity, all other runtime files and assets remain unchanged.
+
+15 focused synthetic geometry/cache checks, 19 existing cave/cache checks,
+6 disk-storage checks and the Safari/stair regression pass under LuaJIT.
+No Android visual/gameplay check. See
+[the grass merge report](docs/LEGENDARY_GRASS_MERGE.md) for scope and evidence.
+
 # Legendary Cave Update integration — 2026-09-09
 
 Merged the supplied Legendary Cave Update into the clean `Legendary-Updates`

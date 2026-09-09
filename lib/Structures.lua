@@ -4285,6 +4285,10 @@ end
 -- field edge-on.  The end caps matter: without them the front/back pair was
 -- still mathematically paper-thin from a side angle, so whole rows blinked as
 -- the camera crossed that angle even though the centre card softened it.
+-- TEST138 keeps those caps inside each clump but suppresses only an exposed
+-- east tile-boundary cap. Repeating boundary caps lined up into the rigid dark
+-- strip visible along every field's right edge; the crossed centre card and
+-- all non-boundary caps still provide the camera-safe side silhouette.
 --
 -- One tile is ONE standing piece, full height. The first cut split each
 -- tile again into its top and bottom four art rows and stood those at
@@ -4348,6 +4352,7 @@ local function grassTemplate(map, data, tileId)
           { ix2 + 1, yTop, zB }, { ix2 + 1, yTop, zF },
           uv = { { u1, v1 }, { u1, v1 }, { u1, v0 }, { u1, v0 } },
           shade = 0.84,
+          tileBoundary = ix2 == 7 and "east" or nil,
         }
         -- Use the full authored stroke width on the perpendicular card.
         -- TEST98's 0.75 compression left the narrowest grass strokes with
@@ -4382,6 +4387,11 @@ end
 function Structures.buildGrass(S, map, x0, x1, y0, y1, data)
   local templates = {}
   local quads = S.grassQuads
+  local function isStandingGrassTile(tx, ty)
+    local s = S.shapeAt[keyOf(tx, ty)]
+    return s and s.art == "grass"
+      and map:isGrassCell(math.floor(tx / 2), math.floor(ty / 2))
+  end
   for ty = y0, y1 do
     for tx = x0, x1 do
       Budget.tick()
@@ -4400,14 +4410,17 @@ function Structures.buildGrass(S, map, x0, x1, y0, y1, data)
           templates[tileId] = tpl
         end
         local wx, wz = tx * 8, ty * 8
+        local eastContinues = isStandingGrassTile(tx + 1, ty)
         for _, q in ipairs(tpl) do
-          quads[#quads + 1] = {
-            { q[1][1] + wx, q[1][2], q[1][3] + wz },
-            { q[2][1] + wx, q[2][2], q[2][3] + wz },
-            { q[3][1] + wx, q[3][2], q[3][3] + wz },
-            { q[4][1] + wx, q[4][2], q[4][3] + wz },
-            uv = q.uv, shade = q.shade,
-          }
+          if not (q.tileBoundary == "east" and not eastContinues) then
+            quads[#quads + 1] = {
+              { q[1][1] + wx, q[1][2], q[1][3] + wz },
+              { q[2][1] + wx, q[2][2], q[2][3] + wz },
+              { q[3][1] + wx, q[3][2], q[3][3] + wz },
+              { q[4][1] + wx, q[4][2], q[4][3] + wz },
+              uv = q.uv, shade = q.shade,
+            }
+          end
         end
       end
     end
