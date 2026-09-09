@@ -300,7 +300,13 @@ local oldDraw = love.graphics.draw
 summary.testDrawSprite = true
 frame1.testMetric = {y0=20,y1=59}
 SummaryMenu.draw(summary)
-ok(drawn[#drawn].args[2] == -20, "FULL Summary anchors first pose above shared animation padding")
+ok(drawn[#drawn].args[2] == -4, "FULL Summary grounds 40px first pose despite shared padding")
+frame1.testMetric = {y0=10,y1=29}
+SummaryMenu.draw(summary)
+ok(drawn[#drawn].args[2] == 26, "FULL Summary grounds 20px first pose at row 55")
+frame1.testMetric = {y0=12,y1=81}
+SummaryMenu.draw(summary)
+ok(drawn[#drawn].args[2] == -12, "FULL Summary retains large first-pixel top alignment")
 frame1.testMetric = nil
 ok(drawn[#drawn].args[1] == 80, "oversized mirrored FULL frame starts at x=0")
 frame2.w = savedWidth

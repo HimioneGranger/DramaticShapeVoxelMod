@@ -591,7 +591,12 @@ function InterfaceSprites.installSummary()
       local left = math.max(0, math.floor((72 - w) / 2))
       local first = screenFrames(state)[1]
       local metric = BattleArt.metrics and BattleArt.metrics(first)
-      local top = metric and -metric.y0 or py
+      -- Ground the first visible pose inside the 56px portrait. Keep this
+      -- offset for every frame so authored hops/bobs are not cancelled out.
+      -- Oversized first poses retain their existing top-pixel alignment.
+      local firstH = metric and (metric.y1 - metric.y0 + 1)
+        or select(2, first:getDimensions())
+      local top = math.max(0, 56 - firstH) - (metric and metric.y0 or 0)
       graphics.draw = function(image, x, y, ...)
         if image == sprite and type(x) == "number" then x, y = x + left - 8, top end
         return draw(image, x, y, ...)
