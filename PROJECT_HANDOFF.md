@@ -1,3 +1,31 @@
+# Local PR #52/#53 integration — 2026-09-09
+
+Branch `codex/legendary-pr52-pr53-integration` starts from the user's local
+master `b435d467b55b1c743a13193e794e3dcce5e8b1a2`. Integrated PR #52
+`936b23a` and PR #53 `b94eaf3`. Resolved overlapping handoff notes and ignore
+rules; production changes merged automatically.
+
+Tower textures, backdrop and mounted-mod/physical-folder ambient audio reads
+now use `assets/legendary/`. All 12 supplied PNG/MP3 files are present,
+nonempty, ignored and untracked. No media added to source history. The donor's
+`lib/` install notes below are historical; use the new path and retain filenames.
+`backdrop4.png` is supplied alternate art; the runtime selects `backdrop.png`.
+Manifest/mod identity stays at 1.10.5. Cache revision stays 37, with both the
+Safari-specific refresh token and v5 auxiliary grass token retained.
+
+Fresh validation: all 128 production Lua files compile under LuaJIT 2.1.
+Thirteen existing suites pass (318 counted checks plus Safari wall/stair/foliage
+assertions): Legendary cache/UV/settings, grass edges, build budget, disk
+storage, Safari, ladders, Cut drop/mesh refresh, restored world hooks, OFF
+storage/live hooks, heal overlays and reflections. The Windows harness's
+rename-self directory probe prevented mod discovery; reran the two affected
+suites with only that probe replaced in memory by a read-only host directory
+check. No production or test files changed for this. Asset paths, exclusions,
+cache tokens and unchanged manifest (normalizing line endings) verified.
+These are headless/mocked checks; Android gameplay, GPU visuals, Tower memory
+cost and frame time still require device validation. Earlier reports below
+are historical. This integration is local; no remote push or master merge.
+
 # Safari ground coverage and cache refresh — 2026-09-08
 
 Complete olive treatment for flat grass tile94 and hedge/edge variants13,79,84–93.
