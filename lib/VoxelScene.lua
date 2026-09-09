@@ -11,6 +11,7 @@
 
 -- the mod namespace (see main.lua): V.require loads a sibling module
 local V = ...
+local Timings = V.require("LoadTimings")
 
 local Mat4 = V.require("Mat4")
 local Voxel3D = V.require("Voxel3D")
@@ -33,7 +34,16 @@ local ShipHull = V.require("ShipHull")
 local SafariStatues = V.require("SafariStatues")
 local SafariFoliage = V.require("SafariFoliage")
 local CommunityFlora = V.require("CommunityFlora")
+local CommunityVisuals = V.require("CommunityVisuals")
+local Backdrop = V.require("Backdrop")
+local SkyLayer = V.require("SkyLayer")
+local ForestAtmos = V.require("ForestAtmos")
+local ForestDressing = V.require("ForestDressing")
 local CavePerimeter = V.require("CavePerimeter")
+local CaveSconces = V.require("CaveSconces")
+local TowerLobbyDetails = V.require("TowerLobbyDetails")
+local TowerGraveMist = V.require("TowerGraveMist")
+local CaveAtmosphere3D = V.require("CaveAtmosphere3D")
 local RenderDistance = V.require("RenderDistance")
 local CharacterRenderers = V.require("CharacterRenderers")
 local PaletteFX = require("src.render.PaletteFX")
@@ -613,6 +623,10 @@ function VoxelScene.invalidate()
   SafariFoliage.invalidate()
   SafariStatues.invalidate()
   CommunityFlora.invalidate()
+  ForestDressing.invalidate()
+  Backdrop.invalidate()
+  SkyLayer.invalidate()
+  ForestAtmos.invalidate()
   lastCompleteCanvas, lastCompleteW, lastCompleteH = nil, 0, 0
   lastCompleteMapId = nil
 end
@@ -1117,12 +1131,18 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
     ShadowMap.discard()
     return
   end
-  if not ShadowMap.available() then return end
-  local sig = shadowSignature(state, terrain, nbMesh, posed, cx, cy, vw, vh)
-  sig = sig .. "|community-tree:" .. CommunityFlora.shadowSignature(state)
+  if not Timings.call("shadow_setup", ShadowMap.available) then return end
+  local function signature()
+    local sig = shadowSignature(state, terrain, nbMesh, posed, cx, cy, vw, vh)
+    return sig .. "|community-tree:" .. CommunityFlora.shadowSignature(state)
+  end
+  local sig = Timings.call("shadow_keys", signature)
   if not ShadowMap.stale(sig) then return end
-  if not ShadowMap.begin(cx, cy, vw, vh) then return end
+  if not Timings.call("shadow_setup", ShadowMap.begin, cx, cy, vw, vh) then
+    return
+  end
 
+  local function castWorld()
   ShadowMap.draw(terrain, atlasFor(state.map), nil)
   ShipHull.draw(state, atlasFor(state.map), true)
   for _, visual in ipairs(visualShadows or {}) do
@@ -1163,7 +1183,10 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
                      ShadowMap.snug(Mat4.translate(nb.ox, 0, nb.oy)))
     end
   end
-  pcall(CommunityFlora.castShadows, state, ShadowMap, Mat4)
+  end
+  Timings.call("shadow_world", castWorld)
+  pcall(Timings.call, "shadow_trees", CommunityFlora.castShadows,
+        state, ShadowMap, Mat4)
   -- From here down it is the CAST, marked as such in the map (see
   -- ShadowMap.sprites) so water can decline them: everything the world casts
   -- still shades a lake, a silhouette of somebody standing beside it does
@@ -1175,6 +1198,7 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
   ShadowMap.sprites(true)
   -- authored figures cast too, for the same reason the flowers do: a
   -- handful of cards per map, and a person with no shadow reads as pasted on
+  local function castFigures()
   eachFigure(state.map, 0, 0, function(mesh, _, caster)
     ShadowMap.draw(mesh, atlasFor(state.map), ShadowMap.snug(caster))
   end)
@@ -1185,6 +1209,11 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
       end)
     end
   end
+  end
+  Timings.call("shadow_figures", castFigures)
+  -- Keep the actor loop and its trailing sprites(false) inside one helper:
+  -- Stadium ba.9 replaces that loop verbatim when rebuilding this scene.
+  local function castActors()
   for _, p in ipairs(posed) do
     if RenderDistance.point(p.px + 8, p.py + 8, state.player) then
       local facing = viewFacing(p)
@@ -1210,8 +1239,10 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
     end
   end
   ShadowMap.sprites(false)
+  end
+  Timings.call("shadow_actors", castActors)
 
-  ShadowMap.finish(sig)
+  Timings.call("shadow_finish", ShadowMap.finish, sig)
 end
 
 local renderGeneration = 0
@@ -1226,7 +1257,8 @@ local lastPaletteFor = nil
 -- harmless for the others (their exact coloured variant is made normally).
 function VoxelScene.warmAtlas(map)
   if not map then return nil end
-  return TerrainAtlas.forMap(map, modeColors(lastPaletteFor, map))
+  return Timings.call("textures", TerrainAtlas.forMap,
+                      map, modeColors(lastPaletteFor, map))
 end
 
 function VoxelScene.render(state, w, h, vw, vh, paletteFor)
@@ -1238,7 +1270,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- Voxel.ready also holds the camera tween at flat until terrain exists.
   local terrain, nbMesh, water, nbWater, neighborhoodReady,
     visualShadows, nbVisualShadows =
-    VoxelScene.prefetch(state)
+    Timings.call("prefetch", VoxelScene.prefetch, state)
   if not neighborhoodReady then
     -- The FULL mesh already suppresses its ring beneath every connected map.
     -- Drawing before those BODY meshes arrive exposes literal holes around the
@@ -1267,6 +1299,9 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   Voxel3D.glassNight = outdoor and DayNight.windowLight() or 0
   local g = VoxelScene.glintStep(glint, cx, cy)
   Voxel3D.glassPhase, Voxel3D.glassGlint = g.phase, g.amp
+  local atmos = CommunityVisuals.customForest()
+                and ForestAtmos.frame(state.map) or nil
+  Voxel3D.fog = atmos and atmos.fog or nil
 
   renderGeneration = renderGeneration + 1
   local generation = renderGeneration
@@ -1293,7 +1328,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
     end
     if rec.generation ~= generation then
       rec.generation = generation
-      rec.value = TerrainAtlas.forMap(map, colorsFor(map))
+      rec.value = Timings.call("textures", TerrainAtlas.forMap, map, colorsFor(map))
       rec.hasValue = rec.value ~= nil
     end
     return rec.hasValue and rec.value or nil
@@ -1307,7 +1342,13 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
     return colorsFor(map)
   end
 
+  -- Keep this exact pose-capture statement: Stadium inserts its model prepare
+  -- call immediately after it. Both operations must land inside this probe.
+  local function timedPoses()
   local posed, me = posesOf(state, spriteColors)
+    return posed, me
+  end
+  local posed, me = Timings.call("actor_prepare", timedPoses)
 
   -- The first-person rig, built (or blended) for this frame and handed to
   -- Voxel3D BEFORE either pass runs: the sun's box is fitted around this
@@ -1341,13 +1382,23 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   local underlayColor = WorldUnderlay.resolve(state, colorsFor(state.map))
 
   local shCx, shCy = FirstPerson.shadowCenter(cx, cy, vh)
-  castShadows(state, terrain, nbMesh, posed, shCx, shCy, vw, vh, atlasFor,
+  Timings.call("shadows", castShadows,
+              state, terrain, nbMesh, posed, shCx, shCy, vw, vh, atlasFor,
               water, nbWater, visualShadows, nbVisualShadows)
 
   if not Voxel3D.beginScene(w, h, cx, cy, vw, vh, skyFor(state.map)) then
     Voxel3D.setCompanionCameraDelta(nil)
+    Voxel3D.fog = nil
     return nil
   end
+
+  -- TEST55 N64 Memory scenic layer.  Both modules retain their own outdoor
+  -- and canopy guards, and the option defaults to Battle Art, so this is an
+  -- additive background seam rather than a renderer replacement.
+  Voxel3D.glass(false)
+  pcall(Backdrop.draw, state)
+  pcall(SkyLayer.draw, state)
+  Voxel3D.glass(true)
 
   -- Extension backgrounds run after the host has opened its isolated 3D
   -- target and before any host terrain. Adapter and extension failures are
@@ -1394,7 +1445,13 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   for _,nb in ipairs(state.neighbors or {}) do if RenderDistance.neighbor(nb,state.player) then GranitePillars.draw(nb.map,nb.ox or 0,nb.oy or 0) end end
 
   Voxel3D.glass(false)
+  pcall(ForestDressing.draw, state)
   pcall(CommunityFlora.drawCommunityTrees, state)
+  pcall(CommunityFlora.drawCommunityForest, state, atlasFor)
+  pcall(TowerLobbyDetails.draw, state)
+  pcall(CaveSconces.draw, state)
+  pcall(CaveAtmosphere3D.draw, state)
+  pcall(CommunityFlora.drawCommunityCaveAtmosphere, state)
   Voxel3D.glass(true)
 
   -- Trees or rocks continue the authored route beyond its finite mesh. They
@@ -1488,7 +1545,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- the real pass below uses
   if #waterDraws > 0 then
     VoxelScene.drawWater(waterDraws, function()
-      drawCast(state, posed, atlasFor)
+      Timings.call("actor_draw", drawCast, state, posed, atlasFor)
     end)
   end
 
@@ -1532,7 +1589,11 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- drawEntity resolves the lean-over-the-wall-in-front case, and a
   -- character genuinely behind a building is far deeper and loses the
   -- test, so buildings and trees really occlude.
-  drawCast(state, posed, atlasFor)
+  Timings.call("actor_draw", drawCast, state, posed, atlasFor)
+  -- Tower fog is translucent world volume. Drawing it after the opaque cast
+  -- lets depth decide whether a bank is in front of or behind each figure,
+  -- so knee-high mist can naturally veil legs instead of being overwritten.
+  pcall(TowerGraveMist.draw, state)
   -- tall grass last, pulled camera-ward exactly as far as the characters
   -- were (same per-vertex shader bias, so grass never drifts either):
   -- relative depth between a walker and the tuft row south of their feet
@@ -1541,6 +1602,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- buildings it genuinely stands behind (far deeper than the pull).
   local Voxel = V.require("VoxelState")
   local pull = VoxelScene.pull(math.max(Voxel.angle, 0.05))
+  Timings.call("grass_flowers", function()
   Voxel3D.draw(ChunkMesher.grass(state.map), atlasFor(state.map), nil, pull)
   for _, nb in ipairs(state.neighbors or {}) do
     if RenderDistance.neighbor(nb, state.player) then
@@ -1548,6 +1610,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
                    Mat4.translate(nb.ox, 0, nb.oy), pull)
     end
   end
+  end)
   -- flower billboards: pulled like the characters and the grass, MINUS
   -- the depth of 8 world pixels along the view (8 sin a -- the camera
   -- looks along (0, -cos a, -sin a), so that is exactly one tile row of
@@ -1561,6 +1624,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   local fpull = math.max(0, pull - 8 * math.sin(math.max(Voxel.angle, 0.05)))
   -- flowers are snugged casters too, so they read their own shadowing
   -- through the same snugged transform the sun stored them with
+  Timings.call("grass_flowers", function()
   Voxel3D.draw(ChunkMesher.flowers(state.map), atlasFor(state.map), nil,
                fpull, ShadowMap.snug(nil))
   for _, nb in ipairs(state.neighbors or {}) do
@@ -1569,6 +1633,14 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
                    Mat4.translate(nb.ox, 0, nb.oy), fpull,
                    ShadowMap.snug(Mat4.translate(nb.ox, 0, nb.oy)))
     end
+  end
+  end)
+
+
+  -- Viridian's depth-aware atmosphere is last among world visuals, matching
+  -- the donor build: terrain, trees, leaves and actors occlude its light.
+  if CommunityVisuals.customForest() then
+    pcall(ForestAtmos.draw, state.map)
   end
 
   -- The second additive world seam: host actors, water, grass, and flowers
@@ -1587,6 +1659,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   -- The delta belongs only to this overworld render. Do not let it reach a
   -- later battle or another owner of Voxel3D's placed-camera seam.
   Voxel3D.setCompanionCameraDelta(nil)
+  Voxel3D.fog = nil
   if finished then
     lastCompleteCanvas, lastCompleteW, lastCompleteH = finished, w, h
     lastCompleteMapId = state.map and state.map.id or nil

@@ -77,6 +77,7 @@ local SHADER = [[
   varying float vFacadeBack;
   varying vec3 vSun;          // this fragment's place in the sun's view
   varying vec3 vModelSun;     // optional Stadium model-shadow view
+  varying float vFog;         // distance/height haze from Viridian Forest
 #ifdef VOXEL_GRID
   // model space, one unit per voxel -- see VoxelGrid. Precision matters
   // here in a way it does not for a colour: the seam is the FRACTIONAL
@@ -94,6 +95,7 @@ local SHADER = [[
   uniform vec3 eye;
   uniform float pull;
   uniform vec3 curve;         // xy = the focus in world XZ, z = k; 0 = off
+  uniform vec4 fogInfo;       // density, start, heightK; density 0 = clear
   attribute float VertexShade;
   vec4 position(mat4 transform_projection, vec4 vertex_position) {
     vShade = abs(VertexShade);
@@ -125,6 +127,15 @@ local SHADER = [[
     // arena-local coordinates and sample that finished map as a second light
     // layer; no cross-mod render-target or shader handoff is required.
     vModelSun = (modelSunVP * vec4(w.xyz - modelSunOrigin, 1.0)).xyz;
+    // Work out haze on the flat world, before the optional presentation
+    // curve.  Viridian's fog therefore stays planted in the map instead of
+    // bending with the camera trick.
+    vFog = 0.0;
+    if (fogInfo.x > 0.0) {
+      float fogRun = max(0.0, length(w.xyz - eye) - fogInfo.y);
+      vFog = (1.0 - exp(-fogInfo.x * fogRun))
+             * exp(-max(w.y, 0.0) * fogInfo.z);
+    }
     // The curved world (see WorldCurve): drop every vertex by the square
     // of how far its column stands from the camera's focus. Applied AFTER
     // the shadow lookup above and clear of the wireframe's model space, so
@@ -249,6 +260,7 @@ local SHADER = [[
   uniform vec3 weatherMul;
   uniform vec3 weatherAdd;
   uniform vec3 dayTint;       // the hour's light on the world; 1,1,1 = noon
+  uniform vec3 fogColor;      // what the active map haze is made of
   uniform Image glassMask;    // opaque where the atlas texel is window glass
   uniform vec2 glassSize;     // the mask's dimensions: tc -> atlas texels
   uniform float glassNight;   // 0 = daylight .. 1 = the lamps are on
@@ -323,6 +335,9 @@ local SHADER = [[
       vec3 lamp = vec3(1.0, 0.84, 0.5) * (0.5 + 0.55 * shine);
       rgb = mix(pane, lamp, glassNight * glass);
     }
+    // Haze is air between the camera and the finished surface, so it lands
+    // after lighting, shadows, seams and glass but before the ghost overlay.
+    rgb = mix(rgb, fogColor, vFog);
     // The hidden player is a SHAPE, not a dimmed picture of itself. Tinting
     // through `color` could only multiply the sprite's own pixels, which
     // darkens each one by its own amount and keeps the character's internal
@@ -852,6 +867,10 @@ Voxel3D.glassNight = 0
 Voxel3D.glassPhase = 0
 Voxel3D.glassGlint = 0
 
+-- nil on ordinary maps; VoxelScene assigns the approved forest atmosphere
+-- only while the N64 Memory Viridian option is active.
+Voxel3D.fog = nil
+
 -- The sun or moon disc's place on this camera's canvas, or nil when the
 -- body is set, on the southern half of the sky, or behind the camera.
 --
@@ -1025,6 +1044,11 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot, modelShadow, borrow
   pcall(sh.send, sh, "weatherHazeColor", weather.haze and weather.haze.color or {0,0,0})
   pcall(sh.send, sh, "weatherMul", weather.tint and weather.tint.multiplier or {1,1,1})
   pcall(sh.send, sh, "weatherAdd", weather.tint and weather.tint.additive or {0,0,0})
+  local fog = Voxel3D.fog
+  pcall(sh.send, sh, "fogColor", (fog and fog.color) or { 0, 0, 0 })
+  pcall(sh.send, sh, "fogInfo", fog and
+        { fog.density or 0, fog.start or 0, fog.heightK or 0, 0 }
+        or { 0, 0, 0, 0 })
   -- the window glass: the tileset's mask (or the blank -- the sampler is
   -- declared either way, and unbound is a driver-dependent crash), how lit
   -- the panes are, and the movement-fed glint as the caller last set it

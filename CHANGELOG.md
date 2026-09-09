@@ -1,6 +1,671 @@
 # Changelog
 
+## TEST137 — Tower master and wall finishes
+
+- Added `TOWER VISUALS` as the first row in
+  `LEGENDARY VISUALS → POKEMON TOWER`.
+- `BATTLE ART` now restores the original Tower atlas, 16px wall profile,
+  floor, counter, stairs and graves and suppresses all added fog/details.
+- Kept `LEGENDARY VISUALS` as the migration-safe default so existing installs
+  retain TEST136's approved appearance.
+- Added three live Tower wall choices: the existing 2048px `SMOKE BLACK`, a
+  bold charcoal-ribbon `STORM WHITE`, and a calmer silver `PEARL WHITE`.
+- Preserved subordinate Tower detail/fog/thickness/speed selections while the
+  master switch is set to Battle Art.
+- Added a recessed opaque honed-floor safety surface beneath claimed grave and
+  prop footprints, removing blue battle-void leaks while preserving real
+  descending stairwell openings.
+
+## TEST136 — Tower details options
+
+- Added the missing TOWER DETAILS row to LEGENDARY VISUALS → POKEMON TOWER.
+- OFF skips the Tower sconce and reception-detail draw paths before allocation.
+- SUBTLE keeps steady high wall torches and wall light without flicker, embers,
+  or the reception brass accent.
+- FULL preserves TEST135's approved animated flames, restrained wall flicker,
+  embers, and reception counter trim as the default.
+- Kept Tower materials and all fog controls independent and unchanged.
+- Replaced the original vivid-blue 5F healing-zone floor tile with a pale
+  stone inlay. It remains readable during exploration without producing blue
+  strips between grave rows in the staged battle camera.
+
+## TEST135 — Legendary Visuals options
+
+- Added a top-level LEGENDARY VISUALS page to the current in-game OPTIONS
+  screen, with focused Pokemon Tower, cave, environment and battle pages.
+- Preserved the flat options list for the mod manager and older engines.
+- Added TOWER FOG OFF/ON without allocating new fog resources while disabled.
+- Added LIGHT, NORMAL, THICK and HEAVY FOG THICKNESS levels.
+- Added SLOW, NORMAL and FAST FOG SPEED levels with phase-continuous motion.
+- Kept TEST134's opacity, height and speed as the exact NORMAL defaults.
+- Exposed the already-wired FOREST FX LOW/OFF control.
+- Added recursive live menu rebuilding for the new nested category pages and
+  for the Legendary Pokeball master/preset-dependent rows.
+
+## TEST134 — Rolling fog banks
+
+- Locked TEST133's approved continuous six-group motion.
+- Replaced circular floor shells with long open lumpy height-field ribbons.
+- Layered a broad body with a narrow offset ridge for dense rolling cores.
+- Added a scoped soft-alpha noise shader with a safe shared-shader fallback.
+- Limited average overlap to two surfaces and removed bright cross-bank lattices.
+- Moved fog after opaque figures so foreground banks can naturally veil legs.
+- Limited rounded geometry to a few rising, evaporating upper wisps.
+- Kept reception fog-free and preserved all approved Tower materials.
+
+## TEST133 — Volumetric cloud shells
+
+- Rebuilt Pokemon Tower grave fog as irregular single-shell cloud banks.
+- Removed transparent back faces that exposed each bank as a flat circle.
+- Replaced tinted frame swapping with continuous interleaved drift and breathing.
+- Added sparse rising and evaporating upper wisps.
+- Removed the colour-cycling reception fog while preserving lobby detailing.
+- Preserved every approved Tower material byte-for-byte.
+
+## TEST132 — Living Tower atmosphere
+
+- Smooths each fog volume from six to ten sides and four latitude rings so the
+  approved true-3D thickness no longer exposes large crystalline facets.
+- Replaces the round cluster field with fewer, wider, flatter banks while
+  retaining TEST131's complete grave-section footprint.
+- Adds independent floor crawl, expansion/compression, lifting crowns and
+  shrinking upper wisps across a continuously cross-faded 46-second cycle.
+- Adds sparse, very low-opacity ankle haze to walkable lobby floor so the
+  atmosphere no longer ends abruptly at the grave section.
+- Splits Tower sconces into three independent animation groups and lets their
+  wall-biased amber reflections follow a restrained slow flicker.
+- Adds a generated hairline aged-brass rim around exposed edges of the 1F
+  reception counter without modifying its approved granite materials.
+
+## TEST131 — True-3D voxel-cloud fog
+
+- Replaces TEST130's intersecting fog cards and their visible X/star patterns
+  with closed low-poly geometry inspired by the proven Poké Ball smoke.
+- Builds each bank from three overlapping rounded ellipsoids with real width,
+  height and depth, varied pale-gray tones and irregular asymmetric crowns.
+- Retains TEST130's room-wide grave-section footprint while using three large
+  banks per fog-zone cell for dense, continuous floor coverage.
+- Moves the banks only fractions of a world pixel and cross-fades eight poses
+  across a 72-second cycle for heavy, nearly stagnant fog-machine motion.
+
+## TEST130 — Graveyard fog field
+
+- Expands every detected grave into a roughly two-cell fog neighborhood.
+- Merges overlapping neighborhoods into connected fields covering tombstone
+  sections, the aisles between rows and surrounding walkable floor.
+- Uses four substantially larger cloud lobes per fog-zone cell, with slightly
+  stronger volume directly over monuments and a 32-second billow.
+- Leaves reception and distant non-grave areas clearer for scene readability.
+
+## TEST129 — 3D volumetric grave fog
+
+- Removes the horizontal fog veil responsible for TEST128's spilled-water look.
+- Builds each bank from five overlapping irregular cloud lobes at varied
+  heights and depths, with three intersecting upright cards per lobe.
+- Raises fog density and volume to evoke a fog machine running high while
+  retaining fixed anchors and a slow 32-second billow.
+
+## TEST128 — Visible resting-fog correction
+
+- Restores the proven shader-safe cloud mask after TEST127's thin ribbon mask
+  was mostly discarded by Voxel3D and appeared as faint white spokes.
+- Stretches the cloud through long geometry to retain a soft bank silhouette.
+- Increases neutral white-gray visibility while keeping fixed grave anchors,
+  sub-pixel sway and the slow 32-second breathing cycle.
+
+## TEST127 — Resting grave fog and pearl counter top
+
+- Replaces the orbiting blue smoke puffs with broad neutral white-gray ribbons.
+- Anchors each bank at a fixed grave position with only a tiny 32-second sway
+  and low-amplitude breathing motion.
+- Keeps the approved dark granite counter body while giving the upward-facing
+  slab a dedicated 1024px pearl-gray smoky-quartz material with sparse warm
+  champagne veins.
+
+## TEST126 — Polished floor and visible grave fog
+
+- Replaces the Tower floor with smooth luxury blue-gray polished stone.
+- Corrects the fog texture for Voxel3D's alpha-test threshold.
+- Expands grave coverage and adds large, overlapping, visibly translucent banks.
+- Blends adjacent animation phases for slower, smoother lateral flow.
+
+## TEST125 — Tower detail polish and grave mist
+
+- Calms the 2048px honed floor while preserving its distinct stone identity.
+- Rebuilds Tower sconces as compact bronze fixtures with localized wall light.
+- Gives stairs and carved graves dedicated 1024px materials and richer geometry.
+- Adds low, slow, depth-tested spectral mist around grave rows.
+
 ## Unreleased
+
+- **TEST124 reference wall and 2048 floor.** Separates the approved TEST123
+  counter into its own unchanged 1024px material region, allowing the Tower
+  wall to adopt a new 2048px granite based on the supplied slab reference:
+  charcoal and medium-gray crystalline masses, broad irregular diagonal smoky
+  swaths and restrained mineral seams without repeated horizontal striping.
+  Adds a smooth upper-wall value lift so pale stone fades in toward the crown
+  and open ceiling. Upgrades the distinct honed floor to 2048px with finer
+  continuous grain. Keeps wall geometry, high torches, wooden stairs, the 5F
+  healing pad and stable third-person shadow behavior unchanged.
+
+- **TEST123 full-resolution smoky black granite.** Upgrades both Tower wall and
+  floor materials from 512px to independent 1024px atlas regions. Reworks the
+  walls, pale ribs and reception counter around broad soft white/silver mineral
+  strands flowing through calm black-charcoal granite instead of dense small
+  veins. Gives the counter its own full-range plan and side UVs so its stone
+  remains crisp despite the compact footprint. The floor stays materially
+  distinct as quiet honed dark stone. Retains TEST122's full-map normalization,
+  64px wall height, high wall torches, wooden stairs, authored 5F healing pad
+  and stable third-person shadow behavior.
+
+- **TEST122 distinct Tower floor and full-map UV correction.** Separates the
+  supplied reference's two materials: detailed layered granite stays on walls,
+  ribs and the stone counter, while level ground uses a new quiet honed dark-
+  gray slab with broad clouding and faint cracks. Replaces TEST121's fixed
+  256px coordinate range with full-map-plus-ring normalization for both 512px
+  texture regions. This removes the real source of the long stripes: geometry
+  beyond that old range had been clamped to and stretching one edge texel.
+  Keeps 64px walls, wall-mounted lighting, wooden stairs, the authored 5F pad,
+  stable third-person shadows and all gameplay behavior unchanged.
+
+- **TEST121 taller unified Pokémon Tower.** Raises all seven Tower wall rings
+  from 48px to 64px and carries their buttresses, crown, high sconces and
+  wall-only amber wash upward as one composition. Routes every ordinary level
+  Tower floor through the same continuous 512px granite material, eliminating
+  the remaining stretched source-atlas strips and patchwork transitions while
+  preserving the authored 5F healing pad. Rebuilds the 1F reception counter as
+  a darker granite base with a projecting polished lip and brighter slab cap.
+  Both stair flights explicitly retain their original wooden artwork and all
+  collision, warps, NPCs and story behavior remain unchanged.
+
+- **TEST120 Tower luxury granite and stable third-person yaw.** Removes
+  TEST119's visible two-pixel colour cells and maps a dedicated prefiltered
+  512px seamless gray-granite material continuously across Tower wall bays,
+  level floors, pale ribs and trim, and the stone reception counter. This
+  restores broad cloudy mineral flow and fine silver veining without bricks,
+  tile grids, relief noise or extra surface normals. Third-person yaw now
+  keeps the global shadow capture centered on the player instead of sliding
+  its finite projection sideways over every stationary surface; first-person
+  directional shadow coverage is retained.
+
+- **TEST119 Tower reference-stone detail.** Replaces TEST118's smooth wall
+  interpolation with stable two-pixel granite cells carrying broad cloudy
+  mineral variation, warped horizontal layers, sparse fractures and darker
+  weathered pockets. Applies a restrained related grain to the pale stone
+  buttresses, plinth and crown; strengthens flat floor and counter mottling;
+  and shrinks the wall-only torch reflection into a much softer amber wash.
+  All stone fronts remain coplanar to preserve TEST118's shimmer fix.
+
+- **TEST118 stable Tower walls, wall light and granite counter.** Makes the
+  fine Tower wall completely coplanar so orbiting cameras cannot turn shallow
+  relief normals into shimmer, while retaining layered granite colour and
+  adding stable two-pixel mineral grain. Removes Tower floor-light pools and
+  places a soft steady amber reflection behind each approved high wall torch.
+  Gives the 1F reception counter matching granite tops and faces; stairs and
+  all gameplay behavior remain unchanged.
+
+- **TEST117 Tower reference-stone refinement.** Replaces TEST116's large
+  triangular wall normals with a fine world-space quad field carrying cloudy
+  horizontal granite strata, small mineral grain and restrained veins. Reduces
+  the depth, brightness and bevel contrast of the vertical ribs and trim so
+  they read as rectangular pale stone rather than sci-fi metal supports. Adds
+  subtle four-pixel variation to the perfectly flat granite floor. Approved
+  flames, open top and all gameplay surfaces remain unchanged.
+
+- **TEST116 Tower wall stability and granite refinement.** Separates the wall
+  backing, rough granite skin, projecting ribs and trim into non-intersecting
+  depth layers to remove camera-angle shimmer. Replaces TEST115's oversized
+  wall/floor facets with dense shallow wall grain and a single flat shared-
+  corner floor field. The wall and ribs move toward the reference's brighter
+  grey granite while approved flames, open top and every gameplay surface stay
+  unchanged.
+
+- **TEST115 Pokémon Tower reference-granite correction.** Removes TEST114's
+  coursed brick generator and repeated dotted floor. Tower 1F through 7F now
+  use a 48px continuous mottled grey-granite wall skin, broad projecting pale
+  buttresses, restrained base/crown structure, and a seamless flat granite
+  floor built from large world-space facets with faint mineral variation.
+  The approved flame geometry and animation remain unchanged; only the full
+  sconce assemblies move upward with the taller wall. Exterior Buildings-mod
+  ownership and all collision, warps, scripts, NPCs, graves, stairs and the 5F
+  healing pad remain untouched.
+
+- **TEST114 Pokémon Tower architectural walls.** Floors 1F through 7F now use
+  a 32px mausoleum enclosure instead of the original 16px decorative course.
+  Exposed faces become weathered purple-charcoal masonry recessed behind
+  projecting stone plinths, belt courses, capstones and continuous vertical
+  piers. Tower sconces move into the upper wall bays. The change is map-scoped:
+  Agatha's room and the separate exterior Buildings mod remain untouched, and
+  no collision, warp, NPC, grave, stair or story data changes.
+
+- **TEST113 Lavender ground activation repaired.** Lavender Town now owns its
+  charcoal/deep-purple plaza finish directly; leaving grass or roads on their
+  Battle Art defaults can no longer bypass the location treatment.
+- **Pokémon Tower mausoleum material pass.** Floors become quiet dark slate,
+  the authored wall ring shifts to purple-charcoal stone, existing 3D graves
+  receive cooler readable stone, and counters/stairs take restrained aged
+  tones. Sparse wall-aware sconces add warm living light without moving map
+  objects, changing collision, or touching the separate exterior Buildings mod.
+- **TEST112 timing behavior preserved.** The diagnostic panel still starts
+  hidden and remains available through `START > TIMINGS`.
+
+- **TEST112 timing overlay hidden by default.** The CPU timing panel no longer
+  covers normal gameplay after launch. Its probes and `START > TIMINGS` toggle
+  remain intact for the next tree-optimization session.
+
+- **TEST111 Lavender Town ground pass.** The authored turf and road families
+  now share one muted olive-stone finish in Lavender Town, removing the neon
+  green and flat grey checkerboard without changing map data or collision.
+  Broad deterministic shading crosses source tile boundaries, and a restrained
+  atlas grain keeps the plaza readable up close without exposing the 8px grid.
+  Atlas and terrain cache identities are map-scoped so TEST110's forest, trees,
+  caves, signs and camera ownership remain unchanged. See `docs/TEST111.md`.
+
+- **TEST110 exact tree-optimization integration and camera handoff.** Verifies
+  TEST105's mature-tree generator, FAST/FULL recipes, cooperative sections,
+  sliced uploads, persistent tree cache, RAM/voxel precache, shadow target
+  reuse and exact Cut/regrowth restoration inside the current caves/signs/
+  Viridian build. The core tree, sapling and shadow modules remain byte-for-
+  byte identical to TEST105; newer forest dressing, sign registries and cache
+  signatures remain protected. Removes TEST108's generic-outdoor Battle Art
+  camera envelope so Battle Cinematics TEST5 owns those cuts, while retaining
+  Viridian's authored camera-safe lock and the dedicated cave correction.
+  Omits TEST105's accidental nested 84.7 MB ZIP. See `docs/TEST110.md`.
+
+- **TEST109 merged environment and optimization build.** Preserves caves/signs
+  TEST108 and incorporates optimization TEST105: FAST/FULL trees, budgeted
+  tree generation and uploads, complete cached sign/placement restoration,
+  shadow target reuse, safe Cut/regrowth restoration and diagnostic timings.
+  Retains the latest cave, sign, Viridian and battle-camera work. Use with the
+  separate Grass and Flowers TEST4 companion. See `docs/TEST109.md`.
+
+- **TEST108 outdoor battle camera envelope.** Keeps TEST107's authored-depth
+  grass and flower meshes, then routes every outdoor Stadium/Battle Cinematic
+  voxel fight through Battle Art's solved arena composition. Viridian Forest
+  retains TEST106's exact fixed pose; other outdoor maps receive only a tiny
+  bounded drift. Full menu/result orbits can no longer carry the eye through
+  nearby tree crowns, hedges or vegetation and turn them into foreground green
+  slabs. Indoor host cameras and the dedicated cave camera remain unchanged.
+
+- **TEST107 battle grass depth lock.** Removes the pitch-derived camera pull
+  from battle grass and flowers. Cinematic cuts could increase that pull from
+  roughly 6 to 46 world pixels, pushing vegetation through the near plane and
+  causing whole strips to disappear, reappear or become giant green slabs.
+  Battle vegetation now remains at its authored world depth through every
+  camera angle. TEST106's hosted Viridian camera lock and all free-roam grass,
+  forest, cave, sign and torch work remain unchanged.
+
+- **TEST106 hosted Viridian camera lock.** Routes Stadium/Battle Cinematic's
+  camera through Viridian's authored `cameraSafe` arena and holds Battle Art's
+  canonical solved forest composition through send-out, attacks and capture.
+  This closes the external-camera bypass that drove through tree crowns and
+  made the terrain and grass appear to pop. TEST105's full closed grass mesh,
+  cave presentation, signs, torches and all other maps remain unchanged.
+
+- **TEST105 camera-safe full grass.** Keeps TEST104's restored TEST102 tele
+  lens, safe Viridian battle start and limited camera steering, while restoring
+  TEST103's closed grass strokes and full-width crossed centre card. Removes
+  TEST104's three-card experiment and forces a fresh auxiliary mesh rebuild.
+  The locked cave, ceiling, formations, torches, signs and forest materials
+  remain unchanged.
+
+- **TEST104 proven battle framing with lightweight grass stability.** Rolls
+  back TEST103's steep custom Viridian lens and heavy closed grass sidewalls.
+  Viridian again uses TEST102's accepted long-lens battle composition, but now
+  opens from its authored pose and limits horizontal/vertical steering before
+  the eye can enter the expanded Legendary tree crowns. Tall grass replaces
+  the redundant front/back pair with three distinct 60-degree cards, keeping
+  the original quad count while guaranteeing a readable silhouette from every
+  yaw. A fresh auxiliary cache signature prevents older grass geometry from
+  returning. Cave, ceiling, formations, torches, signs and forest materials
+  remain unchanged from TEST102.
+
+- **TEST102 forged-charcoal sconce finish.** Refines TEST101's four-part metal
+  hierarchy after in-game review: the wall plate is deeper charcoal, the arm
+  and shaft are darker neutral iron with the blue cast removed, and only the
+  burner rim retains restrained fire warmth. Geometry, torch placement, flame
+  height and animation, cave ceiling and formations, Viridian Forest, and its
+  newly supported Legendary signs remain byte-for-byte unchanged.
+
+- **TEST101 Viridian wayfinders and layered gunmetal sconces.** Extends the
+  opted-in Legendary Kanto sign replacement to Viridian Forest using the
+  forest's own sign tiles and palette-safe timber swatches. Forest plaques now
+  retain their interaction while receiving live `VIRIDIAN / FOREST` and
+  `TRAINER / TIPS` labels. Cave torch geometry, placement and fire remain
+  unchanged, while the support is split into charcoal plate, medium gunmetal
+  arm, darker shaft and a subtly heat-warmed iron rim for readable depth.
+
+- **TEST100 weathered grey cave sconces.** Recolors only the wall plate,
+  projecting arm, upright handle and burner rim from brown to a neutral dark
+  iron-grey finish, so the fixture no longer reads as wood against the cave's
+  earth palette. Torch placement, clearance reservations, tall four-frame
+  flame, hot core, embers, floor glow, cave atmosphere, signs and merged
+  Viridian Forest work remain unchanged from TEST99.
+
+- **TEST99 cave/sign + Viridian Forest merge.** Keeps TEST97's complete cave
+  package and TEST87's location-aware Kanto signs as the protected base, then
+  selectively brings in TEST98's Viridian work: the authored 2x2 tree layout
+  with its taller Legendary silhouette, a bounded finished forest ring,
+  clustered moss-and-leaf-litter ground, quieter tall-grass colors, stable
+  crossed grass cards, and deterministic low-poly mossy boulders replacing the
+  stump quartet. Exploration and battle both draw the same cached forest
+  dressing. Cave ceilings, formations, sourced water, droplets, torch flames,
+  audio, battle exposure and sign placement remain unchanged from TEST97.
+
+- **TEST97 camera-safe ceiling clusters.** Roof-attached stalactite groups now
+  use the exact same camera visibility rule as the high-vault ceiling. First-
+  and third-person exploration and cave battles keep the complete formation;
+  open orbit views hide both roof and attached roots together, eliminating the
+  floating rock pillars exposed while switching camera angles. TEST96 remains
+  untouched as a fallback and no cave geometry, height, effects or battle
+  staging values were changed.
+
+- **TEST96 high-vault cave ceiling.** Raises TEST95's complete ceiling system
+  by 12 world units after gameplay footage showed the roof and stalactite tips
+  compressing the normal camera view. Roof facets, welded chunk boundaries,
+  hanging-cluster proportions, exploration coverage and the battle-safe arena
+  opening are otherwise unchanged. TEST95 remains untouched as a fallback,
+  with every approved cave effect and sign carried forward.
+
+- **TEST95 battle-safe raised cave ceiling.** Raises the continuous cave roof
+  and shortens, thins and slightly reduces its naturally fused stalactite
+  groups so they frame the corridor without crowding the player camera. The
+  welded surface is now cached in seamless 4×4-cell sections: exploration
+  draws the complete canopy, while battles omit only the sections directly
+  above the arena and retain the surrounding ceiling. Orbit views remain open,
+  and TEST94 stays untouched as a fallback with all approved signs, water,
+  flame, motes, footsteps, solid-wall and atmosphere work carried forward.
+
+- **TEST94 continuous cave roof.** Replaces TEST93's disconnected overhead
+  islands—which read as floating tables or giant mushrooms—with one welded,
+  uneven faceted ceiling for first- and third-person exploration. The visible
+  flat caps are gone completely. Fewer, broader and more asymmetrical
+  stalactite clusters now fuse directly into the ceiling, while orbit cameras
+  keep their open diorama view and battle staging retains a fixed clear zone.
+  Normal movement no longer drives a moving ceiling cutaway, eliminating roof
+  pop. TEST93 remains untouched as a fallback, and every approved cave effect,
+  sign, footstep, water, flame and wall fix carries forward.
+
+- **TEST93 true overhead cave ceiling.** Removes TEST92's wall-rim shelves and
+  replaces them with separate, elevated faceted roof masses rooted 44–51
+  pixels above the cave floor. Long clustered stalactites now descend from
+  those overhead masses into the literal black ceiling space instead of
+  growing from wall caps. First person sees the complete roof from below;
+  orbit, third-person and battle cameras open a circular cutaway around their
+  focus so the new ceiling frames play without becoming an opaque lid. The
+  roof meshes are cached in bounded chunks, and all TEST90–92 water, flame,
+  signs, footsteps, atmosphere and solid-wall fixes remain intact.
+
+- **TEST92 visible ceiling canopy.** Corrects TEST91's effectively invisible
+  ceiling dressing by making wall-rooted shelves substantially more frequent,
+  broader, deeper and thicker. Every shelf carries a longer inward-hanging
+  stalactite, with most receiving a second smaller tooth, and the darker
+  underside now sits below the wall crown where first-person cameras can read
+  it clearly. Opposing shelves still leave a central opening, and no collision,
+  floor, wall, water, lighting, sign or battle behavior is changed.
+
+- **TEST91 organic pools and cave ceiling framing.** Replaces the small dark
+  elliptical floor puddles with lighter, asymmetrical multi-lobed water whose
+  fill, sheen, shoreline and animated ripples share the same wall-aligned
+  footprint. FULL detail also grows rare shallow faceted shelves from the
+  solid upper wall, with one or two attached stalactites per cluster. Their
+  projection remains under half a walkable cell, preserving the open camera
+  lane, collision, battle framing and TEST84 solid-wall ghosting fix. TEST90's
+  refined torchlight and every previously approved sign and cave effect remain
+  unchanged.
+
+- **TEST90 refined cave light and water-source blend.** Tightens the three
+  grounded torch pools, substantially lowers their opacity, and adds a few
+  small deterministic highlights so light catches the irregular dirt instead
+  of reading as one flat orange disc. Damp wall sources are broader and closer
+  to the surrounding rock colour while their dark terminal patch is smaller
+  and softer. The TEST89 signs, living motes, 3D droplets, puddles, stalactites,
+  audible footsteps and solid-wall ghosting fix are preserved unchanged.
+
+- **TEST89 high-detail living-cave atmosphere.** Rebuilds the best movement
+  from the early cave prototype as real low-poly world effects: softly drifting
+  faceted moisture motes vary in size, height, depth and motion, shifting from
+  cool mineral light to warm amber near an actual torch. Water beads and falls
+  are larger and clearer, landings gain irregular shore rims and brighter
+  sheen, and FULL pools become denser layered surfaces with defined edges,
+  slow shimmer and stronger expanding ripples. Upper-wall stalactites are
+  broader, longer and more frequent, with roots pushed visibly into the solid
+  crown so the black opening is broken up without a roof slab. TEST88's
+  intersecting wall-glow ovals are removed completely; torchlight now uses
+  floor-only nested patches sampled to the real walkable height, preserving the
+  solid-wall ghosting fix. TEST87's signs and Cerulean Gym clearance are carried
+  forward unchanged.
+
+- **TEST88 cave light, silhouette and sign merge.** Merges TEST87's complete
+  location-aware Kanto wayfinders and Cerulean Gym clearance into the approved
+  solid-wall cave branch. Cave torches now cast substantially wider and
+  brighter nested amber pools across nearby floors and wall faces, and solid
+  formations close to a real sconce receive warmer rock materials. Long
+  line-like seep stems are replaced with compact overlapping damp patches that
+  visibly feed the existing bead, fall, landing and ripple cycle. FULL detail
+  grows denser, broader stalactite clusters directly from the upper wall mass,
+  breaking up the black opening without transparent overlays, roof slabs or
+  camera-lane geometry. TEST84's ghosting fix, TEST81 flame animation, audible
+  cave footsteps, collision and battle staging remain intact.
+
+- **TEST87 Cerulean Gym sign clearance.** Moves only Cerulean City's Gym
+  wayfinder four world pixels west so the wide plaque no longer appears
+  wedged into the building corner; most of the face stays inside its original
+  interactive cell. Sign classification now scans the complete resolved
+  message, allowing the second-line `POKEMON GYM` wording to produce the
+  intended `CERULEAN / GYM` face. Every other TEST85/TEST86 sign keeps its
+  approved model, materials and placement.
+
+- **TEST86 location-aware sign lettering.** Preserves TEST85's approved sign
+  model and materials exactly, but removes its hard-coded `ROUTE 01` stamp.
+  Each plaque now resolves the interactive sign at its own map cell and turns
+  that first line into compact 3x5 lettering. Routes display their real number
+  (`ROUTE 4`, `ROUTE 10`, and so on), while Trainer Tips, Pokémon Centers,
+  Marts and Gyms receive matching short labels. Unknown or scripted text falls
+  back to the current route, town or city instead of displaying a false number.
+
+- **TEST85 final Kanto sign polish.** Keeps TEST84's approved landscape size,
+  grained wooden back and single centered post, while giving the board and
+  inset enamel real clipped corners. The top cap is roughly one quarter
+  thinner without changing the overall silhouette. A palette-locked blue
+  header, block-built red Poké Ball and crisp 3x5 `ROUTE 01` glyphs replace
+  the two plain dark bars. Battle Art signs remain untouched, as do all
+  approved TEST82-TEST84 visuals outside the Legendary sign face.
+
+- **TEST84 horizontal Kanto wayfinders.** The Legendary sign option now
+  replaces the dominant square Game Boy standee instead of merely decorating
+  its rear. Signs become shorter landscape plaques with one stout centered
+  post, a grained wooden body, recessed light enamel, a cool Kanto header and
+  restrained chunky wayfinding marks. The normal billboard still performs its
+  proven ground and visual-object setup before its pixels are exchanged, so
+  companion ownership and shadows remain intact. Selecting Battle Art keeps
+  the stock sign untouched; TEST83 and TEST82 work outside signs is unchanged.
+
+- **TEST83 compact Kanto signposts.** Replaces the oversized four-upright
+  Legendary sign surround with one centered wooden post, a slim coherent
+  backing and a restrained stepped cap aligned to the authored sign's true
+  depth. The original white face and its real in-game label remain untouched,
+  while angled cameras can no longer split an offset support into a stray
+  freestanding post. Battle Art signs remain available through the existing
+  WORLD option; TEST82 caves and every other approved visual are unchanged.
+
+- **TEST82 cave depth pass.** FULL cave detail now grows short, irregular
+  ceiling lips directly from verified upper-wall faces. Their tapered reach
+  leaves the camera lane open, and every hanging formation is anchored to the
+  sloped underside of one of those lips instead of appearing in the black
+  overhead void. Small clusters of squat faceted rubble replace the older
+  pointed wall-foot pairs, staying tight to the edge and clear of the walking
+  lane. Torch reservations protect the entire assembly; TEST81 flames, water,
+  approved walls, dark dirt and audible footsteps remain unchanged.
+
+- **TEST81 tapered living flames.** Keeps TEST80's approved flame height while
+  replacing the broad symmetric upper diamond with a slimmer crooked neck and
+  a longer offset tip. The outer flame has a slightly narrower low belly, and
+  the warm inner core reaches deeper into the burner for a more naturally
+  layered base. Four-frame irregular flicker, torch holders, wall clearance,
+  cave formations, water, dark dirt and audible footsteps remain unchanged.
+
+- **TEST80 taller living flames.** Cave flame silhouettes are roughly 27%
+  taller with a lower, narrower belly, a longer tapered tip and a slightly
+  elongated hot core. The four-frame flicker keeps its irregular height,
+  width, lean and brightness motion, but every possible tip remains below the
+  wall crown. Holders, torch clearance, cave formations, sourced water, dark
+  dirt and TEST79's audible rock footsteps are unchanged.
+
+- **TEST79 torch clearance, natural formations and audible cave steps.** The
+  sconce builder now publishes a shared three-cell wall reservation around
+  every fixture. Seeps, pools, stalagmites, stalactites and fused columns obey
+  that exact map, preventing independent atmosphere geometry from growing
+  through or above the lights. TEST78's flat rock shelves and the older
+  rectangular wall brows are removed; thicker clustered stalagmites now stand
+  farther out from the wall, while FULL hangs tapered formations directly from
+  the irregular upper rock mass and uses broad-ended fused columns with no
+  table, mushroom or T-shaped caps. Cave audio now loads from the active mod
+  package instead of depending on an unpacked folder name. Rock footsteps fire
+  on each 8-pixel Gen 1 tile step, alternate pitch subtly, play at a clearer
+  level, and ship with a safely boosted source sample. TEST78's flickering
+  flames, sourced water cycle, dark dirt and approved walls remain unchanged.
+
+- **TEST78 layered cave formations.** Adds sparse water-carved stalagmite
+  columns and small companion clusters along verified wall edges, using banded
+  low-poly profiles instead of smooth cones. FULL cave detail also adds
+  stalactites attached to irregular shallow rock shelves plus very rare fused
+  floor-to-overhang columns. The partial shelves imply a ceiling without
+  covering the level or blocking the orbit/battle cameras. All formations are
+  cached per map, purely visual and kept outside the centre walking lane;
+  TEST77's animated flames, sourced droplets, Waterworks-inspired moisture,
+  approved walls, dark dirt and blue-seam fix remain unchanged.
+
+- **TEST77 living fire and Waterworks-inspired moisture.** Replaces each
+  T-shaped seep mark with a narrow, asymmetrical branching fissure feeding a
+  soft crooked runnel, while preserving the proven bead, fall and landing
+  cycle. Cave torches now switch among four cached low-poly silhouettes with
+  irregular width, height, lean and brightness changes, producing real flame
+  motion in both free roam and battle without per-frame mesh construction.
+  FULL cave detail deepens wall-edge pools with a slowly breathing cool sheen,
+  sparse expanding surface rings and low damp haze. The existing cave walls,
+  dark granular path, torch mounts, blue-seam fix and encounter geometry remain
+  unchanged.
+
+- **TEST76 sourced wall seeps.** Droplets no longer materialize from the top of
+  a wall. Every emitter now begins at a small dark fissure, follows a crooked
+  damp trail down the existing rock, gathers into a visible 3D bead, releases
+  from mid-wall and lands on its own restrained wet mark and splash ring.
+  Drops are slightly smaller and less saturated while their staged timing keeps
+  the effect readable. No new rock geometry is introduced; TEST75 walls, dirt,
+  sconces, battle framing and blue-seam repair remain unchanged.
+
+- **TEST75 atmosphere regression repair.** Removes TEST74's new rock-lip mesh,
+  which rendered as oversized white formations on-device, and restores the
+  proven TEST73 wall-edge geometry. 3D droplets remain smaller and darker than
+  TEST73, but their density, fall time and visibility budget are raised enough
+  to keep the effect visibly alive. Emitters stay close to verified upper wall
+  faces; splash rings remain restrained, damp markings remain muted, and the
+  donor's bright floating interior motes stay disabled. Approved walls, dark
+  dirt, lowered sconces, battle framing and the blue-seam repair are preserved.
+
+- **TEST74 grounded cave atmosphere.** Removes the donor's bright floating
+  cave motes; water now falls only from an attached irregular rock lip. Drips
+  are smaller, darker, less frequent and slightly translucent, with restrained
+  short-lived splash rings. Wet mineral tracks and wall-edge pools use muted
+  earth-dark colors instead of saturated blue. FULL receives more visible
+  irregular overhangs while keeping the approved natural walls and granular
+  dirt path untouched. Wall sconces are slightly smaller, less repetitive and
+  sit below the wall crown so an occluding corridor cannot expose a detached
+  flame tip. The blue seam fix and cave battle parity remain locked.
+
+- **TEST73 dimensional cave atmosphere.** Replaces the donor's camera-facing
+  drip dots with pooled low-poly teardrops and expanding 3D splash rings.
+  Verified wall edges gain restrained wet mineral runs and natural talus;
+  FULL also adds sparse wall-hugging pools, stalactites, shallow rock brows and
+  low cave haze. Every static detail is one cached mesh per map, while only
+  nearby shared droplet meshes draw. The approved TEST72 walls, dark granular
+  dirt, sealed perimeter, sconces, battle camera and Legendary night remain
+  unchanged. The same atmosphere now follows the cave into battle.
+
+- **TEST72 wall-supported cave torches.** Sconce placement now reads the same
+  resolved cave structure analysis as the terrain mesher. A torch requires a
+  full-height wall behind both halves of its plate plus a continuing lateral
+  wall cell, eliminating fixtures on low ledges, holes, detected voids,
+  ladders, isolated rocks and one-cell columns. The approved sealed walls,
+  dirt, battle camera and sky remain unchanged.
+
+- **TEST71 sealed natural cave walls.** Adds one continuous dark-rock backing
+  face behind each exposed natural wall band. The outward geological facets
+  now connect visually to the walkway cap, so battle-camera movement cannot
+  reveal the blue void through their former hairline gap. Deep fissures expose
+  stone instead, and the geometry cache revision advances so existing installs
+  cannot retain the unsealed wall meshes.
+
+- **TEST70 cave battle parity.** Cave battles now draw the same deep-earth
+  underlay and natural perimeter ridge used in free roam, closing the exposed
+  outer edge that could appear as a cyan line with the pulled-back battle
+  camera. The battle pass also reuses the exact cached 3D wall-sconce meshes,
+  restoring their projecting brackets, volumetric flames and hot cores without
+  changing the approved cave walls, dirt path, sky, arena placement or camera.
+
+- **TEST69 Legendary night merge.** Ports the exact approved TEST56 night
+  correction into the TEST68 cave branch: the menu now says LEGENDARY VISUALS,
+  stars use Battle Art's supported unlit-lighting path, and the opted-in night
+  palette deepens smoothly through twilight. The seamless sky, moon/sun,
+  twinklers, shooting stars, painted mountains and distant Kanto background
+  remain one option; Weather FX continues to own clouds.
+
+- **True 3D cave sconces.** Replaces TEST67's camera-facing flame cards with
+  low-poly wall plates, projecting brackets, wooden handles, six-sided flames
+  and smaller dimensional hot cores. Each fixture is anchored to the exact
+  solid/open boundary and projects six pixels into walkable space, so rough
+  Legendary walls cannot swallow it.
+
+- **Selective Kanto First Person cave atmosphere.** Adds opt-in `CAVE DETAILS`
+  and `CAVE SOUND` rows without importing KFP's ceiling or synthesized wall
+  risers. SUBTLE keeps the approved dark dirt path untouched while adding
+  sparse torches, drips and cave dust; FULL also allows occasional shallow
+  pools. Cave ambience and rock footsteps are independently OFF/LOW/MID, with
+  OFF as the zero-cost default.
+
+- **Darker cave dirt.** Keeps TEST64's approved dense soil grain unchanged but
+  shifts its complete palette to deeper earth brown and lowers only the path's
+  light response, preventing warm cave lighting from turning it bright orange.
+
+- **Raised walkway dirt fix.** Identifies the photographed cave corridor as a
+  raised `shelf`, not the low `ground` changed by TEST61–63. Both walkable cave
+  datums now use the flat dense dirt material; true wall tops, vertical rock,
+  water, holes and authored stair plates remain untouched.
+
+- **Forced dirt-path rebuild.** Explicitly classifies every ordinary walkable
+  cavern tile as dirt and advances the mesh-cache geometry revision. This
+  rejects TEST61/62 records whose baked triangle lighting and solid UVs could
+  otherwise hide the new dense soil material.
+
+- **Dense natural dirt grain.** Removes all diagonal vertex-lighting triangles
+  from cave paths and replaces the solid floor with randomized, rotated soil
+  grain in closely related earth tones. The speckles are texture-only, so the
+  path remains one lightweight quad per tile with no added geometry cost.
+
+- **Dedicated cave dirt paths.** Separates walkable corridors from the rocky
+  wall and ledge design. Cave ground now uses warm compacted earth with broad,
+  subtle soil variation and one lightweight quad per source tile; amplified
+  geological walls and ledge tops remain unchanged.
+
+- **Amplified cave geology.** Turns the accepted underground direction up
+  across the whole scene: much tighter wall and floor facets, deeper warped
+  strata, wider recessed fissures, rough crags, stronger erosion, and a heavier
+  talus foot. All detail is cached connected geometry and high-contrast vertex
+  lighting—not brickwork, a repeating decal, or a field of dark dots.
+
+- **Calmer cave floor.** Preserves the amplified TEST59 wall treatment while
+  broadening floor facets from 11 to 15 world pixels, reducing floor facet
+  density by roughly 46 percent. Shallower relief and softer tonal variation
+  keep the floor natural without letting it compete with the walls.
+
+- **N64 Memory sky and Viridian Forest.** Adds opt-in WORLD rows for the
+  TEST112/113 seamless sky and painted Kanto mountain/background layer, plus
+  TEST115/116 Viridian canopy depth. The forest path includes the finalized
+  Legendary leaf geometry, animated tumbling leaves and map-authored haze;
+  the separate Legendary TREES option retains its gentle foliage sway. Battle
+  Art's battle, NPC, camera, audio and optional Stadium provider systems remain
+  intact.
 
 - Use the terrain side-light sampler for Legendary outdoor cave-mouth passage
   faces, preserving per-corner ambient light while fixing their failed builds.

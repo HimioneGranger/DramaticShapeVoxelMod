@@ -48,6 +48,17 @@ local Images = V.require("BackdropImage")
 local BossBackdrop = V.require("BossBackdrop")
 local AntiAlias = V.require("AntiAlias")
 local CommunityFlora = V.require("CommunityFlora")
+local CommunityVisuals = V.require("CommunityVisuals")
+local CavePerimeter = V.require("CavePerimeter")
+local CaveSconces = V.require("CaveSconces")
+local TowerLobbyDetails = V.require("TowerLobbyDetails")
+local TowerGraveMist = V.require("TowerGraveMist")
+local CaveAtmosphere3D = V.require("CaveAtmosphere3D")
+local WorldUnderlay = V.require("WorldUnderlay")
+local Backdrop = V.require("Backdrop")
+local SkyLayer = V.require("SkyLayer")
+local ForestAtmos = V.require("ForestAtmos")
+local ForestDressing = V.require("ForestDressing")
 local CharacterRenderers = V.require("CharacterRenderers")
 local PaletteFX = require("src.render.PaletteFX")
 local Map = require("src.world.Map")
@@ -925,6 +936,14 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
   -- no glint in the arena: the drift is the shot breathing, not the player
   -- moving, and a shimmer on background windows would fight the mons
   Voxel3D.glassGlint = 0
+  local atmos = not flatFill and CommunityVisuals.customForest()
+                and ForestAtmos.frame(host) or nil
+  local battleFog = atmos and {
+    color = atmos.fog.color,
+    density = atmos.fog.density * 0.5,
+    start = atmos.fog.start,
+    heightK = atmos.fog.heightK,
+  } or nil
 
   -- A flat plate does not wait for or touch voxel meshes. The world arena
   -- still shares free-roam's request/evict bookkeeping and warms nothing
@@ -944,9 +963,21 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
     return TerrainAtlas.forMap(map, VoxelScene._modeColors(palette, map))
   end
 
+  -- Resolve before beginScene, matching VoxelScene's resource-safe order.
+  -- Restrict this parity pass to CAVERN so no existing outdoor/room battle
+  -- backdrop changes as part of the cave seam repair.
+  local hostIsCave = host and host.tileset and host.tileset.id == "CAVERN"
+  -- Cave battles need a readable stage even when the arena lands inside the
+  -- shadow of tall rock walls. This is a small warm exposure lift, scoped to
+  -- CAVERN only; free roam and every outdoor/indoor battle retain their
+  -- established day/night tint.
+  if hostIsCave then Voxel3D.tint = { 1.10, 1.045, 0.98 } end
+  local battleUnderlay = hostIsCave and select(1, WorldUnderlay.resolve(
+      { map = host }, VoxelScene._modeColors(palette, host))) or nil
+
   local groundY = BattleScene.groundY(host, arena)
   normalBallTick(arena, groundY)
-  local cam, pitch
+  local cam
   local externalEye = externalCamera and externalCamera.eye
   local externalFocus = externalCamera and externalCamera.focus
   local externalProjection = externalCamera and externalCamera.projection
@@ -968,13 +999,8 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
       fov = 2 * math.atan(1 / math.abs(externalF)),
       curve = 0,
     }
-    local dx = cam.eye[1] - cam.focus[1]
-    local dy = cam.eye[2] - cam.focus[2]
-    local dz = cam.eye[3] - cam.focus[3]
-    pitch = math.atan2(math.sqrt(dx * dx + dz * dz),
-                       math.max(1e-3, dy))
   else
-    cam, pitch = BattleCam.rig(arena, groundY)
+    cam = BattleCam.rig(arena, groundY)
     cam.fov = BattleScene.letterboxFov(cam.fov, ph, s)
   end
 
@@ -1031,13 +1057,14 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
   -- the hour still has the last word: a sunset fades the arena's shadows
   -- out and the moon presses more softly, exactly as it does outside
   local sunWas = Voxel3D.SHADOW_ALPHA
-  Voxel3D.SHADOW_ALPHA = BattleScene.SHADOW_ALPHA
-                         * DayNight.shadowScale(outdoor)
+  local battleShadow = hostIsCave and 0.36 or BattleScene.SHADOW_ALPHA
+  Voxel3D.SHADOW_ALPHA = battleShadow * DayNight.shadowScale(outdoor)
   -- The same V-GRID row owns the wireframe here and in free roam. OFF means
   -- no seams anywhere; ON keeps the constructed look on both the overworld
   -- and this staged battle shot. Reading the setting through Voxel3D leaves
   -- the player's choice untouched.
   local out = nil
+  Voxel3D.fog = battleFog
   local ok, err = pcall(function()
     -- its own canvas slot: this renders at the window's pixel size and the
     -- free-roam pass does too, but the two are alive at different moments
@@ -1076,7 +1103,18 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
       Voxel3D.backdrop(artImage, UiBackplates.backdropOffsetPixels())
     end
     if not flatFill then
-    Voxel3D.draw(terrain, atlasFor(host), nil)
+      Voxel3D.glass(false)
+      pcall(Backdrop.draw, state)
+      pcall(SkyLayer.draw, state)
+      Voxel3D.glass(true)
+      if battleUnderlay then
+        WorldUnderlay.draw({ map = host }, cx, cy, battleUnderlay)
+      end
+      Voxel3D.draw(terrain, atlasFor(host), nil)
+      -- Free roam closes the finite CAVERN map with this same natural-rock
+      -- ridge. The pulled-back battle camera needs it too; without it the
+      -- battle void can peek through as a bright line at the edge.
+      pcall(CavePerimeter.draw, host, atlasFor(host))
     for i, nb in ipairs(neighbors) do
       Voxel3D.draw(nbMesh[i], atlasFor(nb.map),
                    Mat4.translate(nb.ox, 0, nb.oy))
@@ -1107,8 +1145,18 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
       end
     end
     Voxel3D.glass(false)
+    -- The cave fixtures are generated meshes, not atlas cards. Draw the
+    -- host map's identical cached sconces in battle so their bracket, handle,
+    -- flame volume and hot core remain true 3D from the staged camera.
+    pcall(TowerLobbyDetails.drawBattle, host)
+    pcall(CaveSconces.drawBattle, host)
+    pcall(CaveAtmosphere3D.drawBattle, host, arena)
+    pcall(ForestDressing.drawBattle, host, neighbors)
     pcall(CommunityFlora.battleProps, host, neighbors, arena)
     Voxel3D.glass(true)
+    if CommunityVisuals.customForest() or CommunityVisuals.customTrees() then
+      pcall(CommunityFlora.battleLeaves, state, host, arena)
+    end
     end
     -- The mons, standing on their tiles. Depth-tested like everything else,
     -- so a ledge or a tree between the camera and a Pokemon really is in
@@ -1180,8 +1228,10 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
       tint = Voxel3D.tint,
       light = {
         direction = { 0.35, 0.7, 0.62 },
-        ambient = { 0.46, 0.46, 0.46 },
-        diffuse = { 0.72, 0.72, 0.72 },
+        ambient = hostIsCave and { 0.62, 0.56, 0.52 }
+                              or { 0.46, 0.46, 0.46 },
+        diffuse = hostIsCave and { 0.80, 0.73, 0.68 }
+                              or { 0.72, 0.72, 0.72 },
       },
       flashing = flashing,
       shadowMap = shadowActive and ShadowMap.texture() or nil,
@@ -1210,21 +1260,29 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
     -- selected character depth-tested in the arena without changing Pokemon
     -- placement, combat state, the camera, or Legendary Pokeball ownership.
     local providerTrainer = BattleScene.drawTrainerAndBall(state, battle, arena, groundY)
+    -- Match free roam: composite Tower fog after the opaque battlers so its
+    -- world depth can veil only the portions genuinely inside a foreground bank.
+    pcall(TowerGraveMist.drawBattle, host)
     Voxel3D.glass(true)
     Voxel3D.seams(true)
     if flashing then Voxel3D.flatten(nil) end
-    -- grass and flowers ride the same camera-ward pull the free-roam pass
-    -- gives them, measured against THIS camera's pitch rather than the
-    -- orbit's -- there is no character here for them to overdraw, but the
-    -- pull is also what keeps a tuft from z-fighting the floor it stands on
+    -- Battle vegetation stays at its authored world depth. Free roam pulls
+    -- grass camera-ward so the southern tuft row can overdraw a walker's
+    -- feet, but this staged pass has no such 2D ordering requirement. More
+    -- importantly, a cinematic camera can cut from high to almost level in
+    -- one frame: the pitch-derived pull then jumped from roughly 6 to 46
+    -- world pixels, carrying entire grass cards through the near plane and
+    -- making strips vanish, return, or fill the lens as giant green slabs.
+    -- Zero pull makes the depth invariant under every hosted camera cut; the
+    -- upright cards already intersect the floor only at their bottom edge.
     if not flatFill then
-    local pull = VoxelScene.pull(math.max(pitch, 0.05))
+    local pull = 0
     Voxel3D.draw(ChunkMesher.grass(host), atlasFor(host), nil, pull)
     for _, nb in ipairs(neighbors) do
       Voxel3D.draw(ChunkMesher.grass(nb.map), atlasFor(nb.map),
                    Mat4.translate(nb.ox, 0, nb.oy), pull)
     end
-    local fpull = math.max(0, pull - 8 * math.sin(math.max(pitch, 0.05)))
+    local fpull = 0
     Voxel3D.draw(ChunkMesher.flowers(host), atlasFor(host), nil, fpull,
                  ShadowMap.snug(nil))
     for _, nb in ipairs(neighbors) do
@@ -1290,6 +1348,7 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
   -- the placed camera is ours for exactly this pass; anything else that
   -- renders (the free-roam pipeline, next frame) must find the orbit back
   Voxel3D.camera = nil
+  Voxel3D.fog = nil
   Voxel3D.SHADOW_ALPHA = sunWas
   if not ok then
     -- endScene never ran, so the canvas is still bound and the shader still

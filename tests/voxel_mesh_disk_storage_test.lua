@@ -38,6 +38,7 @@ end
 
 local V = { mod = { storage = storage } }
 function V.require(name)
+  if name == 'LoadTimings' then return {wrap = function(_, fn) return fn end} end
   return assert(({ BuildBudget={check=function() end}, StaticGeometry={} })[name], name)
 end
 

@@ -5,6 +5,7 @@ local T = require("tests.harness")
 local root = os.getenv("DS_MOD_PATH") or "mods/BATTLE_ART_VOXEL_FORK"
 local invalidated = {}
 local modules = {
+  LoadTimings = {wrap = function(_, fn) return fn end},
   Structures = { invalidate = function(id) invalidated[#invalidated + 1] = id end },
   Voxel3D = { pushQuad = function() end, newMesh = function(v) return v end },
 }

@@ -20,9 +20,46 @@ CommunityVisuals.masonry = ModSetting.new(
   { "GRANITE", "RED BRICK", "SANDSTONE", "SLATE" }
 )
 
+-- The cave overhaul is intentionally opt-in, like the rest of the community
+-- visual families.  Existing installs therefore retain Battle Art's authored
+-- cave tiles until the player explicitly selects Legendary Visuals.
+CommunityVisuals.caves = ModSetting.new(
+  "communityCaves", "CAVES",
+  { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }
+)
+
+-- New installs retain Battle Art; explicitly saved Legendary choices resume.
+CommunityVisuals.tower = ModSetting.new(
+  "communityTower", "TOWER VISUALS",
+  { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }
+)
+
+-- Three full-resolution wall slabs share the same geometry and UV field.
+-- The original dark material remains first so existing saves keep their look;
+-- the two reference-matched white granites are opt-in finishes.
+CommunityVisuals.towerWall = ModSetting.new(
+  "communityTowerWall", "TOWER WALL",
+  { "smoke_black", "storm_white", "pearl_white" },
+  { "SMOKE BLACK", "STORM WHITE", "PEARL WHITE" }
+)
+
+-- Kanto First Person's cave atmosphere is exposed separately from its
+-- ceiling/wall builder. This keeps TEST66's approved natural rock walls
+-- authoritative while letting players opt into lightweight cave dressing.
+CommunityVisuals.caveDetails = ModSetting.new(
+  "communityCaveDetails", "CAVE DETAILS",
+  { "off", "subtle", "full" }, { "OFF", "SUBTLE", "FULL" }
+)
+
+CommunityVisuals.caveSound = ModSetting.new(
+  "communityCaveSound", "CAVE SOUND",
+  { "off", "low", "mid" }, { "OFF", "LOW", "MID" }
+)
+
 CommunityVisuals.trees = ModSetting.new(
   "communityTrees", "TREES",
-  { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }
+  { "default", "n64memory", "n64memory_fast" },
+  { "BATTLE ART", "LEGENDARY FULL", "LEGENDARY FAST" }
 )
 
 CommunityVisuals.cutTrees = ModSetting.new(
@@ -55,9 +92,24 @@ CommunityVisuals.courtyards = ModSetting.new(
   { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }
 )
 
+CommunityVisuals.sky = ModSetting.new(
+  "communitySky", "SKY & BACKGROUND",
+  { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }
+)
+
+CommunityVisuals.forest = ModSetting.new(
+  "communityForest", "VIRIDIAN FOREST",
+  { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }
+)
+
 CommunityVisuals.settings = {
   CommunityVisuals.pillars,
   CommunityVisuals.masonry,
+  CommunityVisuals.tower,
+  CommunityVisuals.towerWall,
+  CommunityVisuals.caves,
+  CommunityVisuals.caveDetails,
+  CommunityVisuals.caveSound,
   CommunityVisuals.trees,
   CommunityVisuals.cutTrees,
   CommunityVisuals.signs,
@@ -65,6 +117,8 @@ CommunityVisuals.settings = {
   CommunityVisuals.roads,
   CommunityVisuals.walls,
   CommunityVisuals.courtyards,
+  CommunityVisuals.sky,
+  CommunityVisuals.forest,
 }
 
 local KEYS = {}
@@ -84,6 +138,28 @@ function CommunityVisuals.wallColor()
   return CommunityVisuals.masonry:get()
 end
 
+function CommunityVisuals.customCaves()
+  return CommunityVisuals.caves:get() == "n64memory"
+end
+
+function CommunityVisuals.customTower()
+  return CommunityVisuals.tower:get() == "n64memory"
+end
+
+function CommunityVisuals.towerWallStyle()
+  local style = CommunityVisuals.towerWall:get()
+  if style == "storm_white" or style == "pearl_white" then return style end
+  return "smoke_black"
+end
+
+function CommunityVisuals.caveDetailLevel()
+  return CommunityVisuals.caveDetails:get()
+end
+
+function CommunityVisuals.caveSoundLevel()
+  return CommunityVisuals.caveSound:get()
+end
+
 -- TEST366's community pillars are a locked granite design. Masonry color
 -- belongs only to the TEST435 retaining walls and authored ledges.
 function CommunityVisuals.pillarColor()
@@ -96,6 +172,13 @@ function CommunityVisuals.color()
 end
 
 function CommunityVisuals.customTrees()
+  return CommunityVisuals.trees:get() ~= "default"
+end
+
+-- Preserve the existing saved Legendary selection as the approved full mode.
+-- Players can still select the untouched maximum-detail tree recipe for an
+-- immediate visual/performance comparison.
+function CommunityVisuals.fullTreeDetail()
   return CommunityVisuals.trees:get() == "n64memory"
 end
 
@@ -127,6 +210,14 @@ function CommunityVisuals.customCourtyards()
   return CommunityVisuals.courtyards:get() == "n64memory"
 end
 
+function CommunityVisuals.customSky()
+  return CommunityVisuals.sky:get() == "n64memory"
+end
+
+function CommunityVisuals.customForest()
+  return CommunityVisuals.forest:get() == "n64memory"
+end
+
 -- Layout changes affect both the stock round-object stamp and the replacement
 -- mesh.  Drop only derived runtime geometry; map data, collision and disk
 -- cache files remain untouched and rebuild through Battle Art's normal queue.
@@ -138,12 +229,21 @@ function CommunityVisuals.invalidate()
   _G.__ds_sapling_cells = nil
   pcall(function() V.require("GranitePillars").invalidate() end)
   pcall(function() V.require("CommunityFlora").invalidate() end)
+  pcall(function() V.require("ForestDressing").invalidate() end)
+  pcall(function() V.require("CaveSconces").invalidate() end)
+  pcall(function() V.require("CaveAtmosphere3D").invalidate() end)
+  pcall(function() V.require("TowerGraveMist").invalidate() end)
+  pcall(function() V.require("TowerLobbyDetails").invalidate() end)
+  pcall(function() V.require("Backdrop").invalidate() end)
+  pcall(function() V.require("SkyLayer").invalidate() end)
+  pcall(function() V.require("ForestAtmos").invalidate() end)
+  pcall(function() V.require("TileShape").invalidate() end)
   pcall(function() V.require("TerrainAtlas").invalidate() end)
   pcall(function() V.require("ChunkMesher").invalidate() end)
 end
 
--- The ordinary OPTIONS screen writes through ModSetting.  Wrap only these two
--- rows so the visible world follows the new value without a restart.
+-- The ordinary OPTIONS screen writes through ModSetting. Wrap each community
+-- row so the visible world follows the new value without a restart.
 local function live(setting)
   local baseRow = setting.row
   setting.row = function(self)

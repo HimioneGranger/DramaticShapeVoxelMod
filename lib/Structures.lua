@@ -253,13 +253,18 @@ function Structures.buildCommunityFence(S, map, postCells)
   return true
 end
 
--- TEST46, transplanted from the corrected TEST437 world-prop pass: retain
--- the engine-authored white sign face and its real label. This builder adds
--- only a grained wooden frame/support behind it, so readability and every
--- companion visual-object hook remain owned by the existing billboard path.
+-- TEST101 Kanto wayfinder: the Legendary option owns the complete sign
+-- silhouette instead of decorating the original 16x16 Game Boy standee.  The
+-- authored billboard still runs once below so it can synthesize the correct
+-- ground and publish the normal visual-object identity; its pixel quads are
+-- then discarded in favour of this shorter horizontal marker.  Battle Art's
+-- option keeps that authored billboard completely unchanged.
 function Structures.buildLegendarySigns(S, map, x0, x1, y0, y1, data)
   if not CommunityVisuals.customSigns() then return false end
-  if not (map.tileset and map.tileset.id == "OVERWORLD" and data) then
+  local tilesetId = map.tileset and map.tileset.id
+  local mapId = tostring(map.id or (map.def and map.def.id) or ""):upper()
+  local forestSign = tilesetId == "FOREST" and mapId == "VIRIDIAN_FOREST"
+  if not (data and (tilesetId == "OVERWORLD" or forestSign)) then
     return false
   end
 
@@ -298,34 +303,456 @@ function Structures.buildLegendarySigns(S, map, x0, x1, y0, y1, data)
     { (ax + 7.5) / atlasW, (ay + 0.5) / atlasH },
     { (ax + 0.5) / atlasW, (ay + 0.5) / atlasH },
   }
+  -- Viridian's atlas has no Overworld timber donor at tile $3C. Pull three
+  -- stable brown swatches from its own pixels instead, so the Legendary frame
+  -- never inherits leaves or grass from an unrelated tile number.
+  local function nearestAtlasPixel(tr, tg, tb, fallback)
+    local best, bestDistance = fallback, math.huge
+    for py = 0, atlasH - 1 do
+      for px = 0, atlasW - 1 do
+        local r, g, b, a = data:getPixel(px, py)
+        local scale = math.max(r or 0, g or 0, b or 0, a or 0) > 1.001
+                      and 255 or 1
+        r, g, b = (r or 0) / scale, (g or 0) / scale, (b or 0) / scale
+        a = a == nil and 1 or a / scale
+        if a > 0.01 then
+          local distance = (r - tr) * (r - tr)
+                         + (g - tg) * (g - tg)
+                         + (b - tb) * (b - tb)
+          if distance < bestDistance then
+            bestDistance = distance
+            best = { (px + 0.5) / atlasW, (py + 0.5) / atlasH }
+          end
+        end
+      end
+    end
+    return best
+  end
+  if forestSign then
+    uv.dark = nearestAtlasPixel(0.12, 0.09, 0.06, uv.dark)
+    uv.body = nearestAtlasPixel(0.34, 0.20, 0.10, uv.body)
+    uv.light = nearestAtlasPixel(0.55, 0.37, 0.18, uv.light)
+  end
   local quads = S.objectQuads
-  local function quad(a, b, c, d, tone, shade, textured)
-    local p = uv[tone]
+  local activeVisualObjectId = nil
+  local function quad(a, b, c, d, p, shade, textured)
     local q = { a, b, c, d, u = p[1], v = p[2], shade = shade,
-                legendarySign = true }
+                legendarySign = true,
+                visualObjectId = activeVisualObjectId }
     if textured then q.uv = grain end
     quads[#quads + 1] = q
   end
+  local function woodQuad(a, b, c, d, tone, shade, textured)
+    -- The Overworld donor carries useful wood grain. Forest timber uses its
+    -- sampled point colors so an unrelated tile cannot texture the board.
+    if forestSign then textured = false end
+    quad(a, b, c, d, uv[tone], shade, textured)
+  end
   local function box(xa, ya, za, xb, yb, zb, textured)
-    quad({xa,ya,zb},{xb,ya,zb},{xb,yb,zb},{xa,yb,zb},"body",0.96,textured)
-    quad({xb,ya,za},{xa,ya,za},{xa,yb,za},{xb,yb,za},"dark",0.72,textured)
-    quad({xa,yb,za},{xb,yb,za},{xb,yb,zb},{xa,yb,zb},"light",1.00,textured)
-    quad({xa,ya,za},{xa,ya,zb},{xa,yb,zb},{xa,yb,za},"dark",0.80,false)
-    quad({xb,ya,zb},{xb,ya,za},{xb,yb,za},{xb,yb,zb},"body",0.88,false)
+    woodQuad({xa,ya,zb},{xb,ya,zb},{xb,yb,zb},{xa,yb,zb},"body",0.96,textured)
+    woodQuad({xb,ya,za},{xa,ya,za},{xa,yb,za},{xb,yb,za},"dark",0.72,textured)
+    woodQuad({xa,yb,za},{xb,yb,za},{xb,yb,zb},{xa,yb,zb},"light",1.00,textured)
+    woodQuad({xa,ya,za},{xa,ya,zb},{xa,yb,zb},{xa,yb,za},"dark",0.80,false)
+    woodQuad({xb,ya,zb},{xb,ya,za},{xb,yb,za},{xb,yb,zb},"body",0.88,false)
   end
 
+  -- An eight-sided wooden prism gives the board real clipped corners from
+  -- both the front and rear cameras.  The three front/back bands avoid
+  -- triangulation seams while the perimeter loop closes every bevel.
+  local function chamferedBox(xa, ya, za, xb, yb, zb, cut)
+    woodQuad({xa,ya+cut,zb},{xb,ya+cut,zb},
+             {xb,yb-cut,zb},{xa,yb-cut,zb},"body",0.96,true)
+    woodQuad({xa+cut,ya,zb},{xb-cut,ya,zb},
+             {xb,ya+cut,zb},{xa,ya+cut,zb},"body",0.96,true)
+    woodQuad({xa,yb-cut,zb},{xb,yb-cut,zb},
+             {xb-cut,yb,zb},{xa+cut,yb,zb},"body",0.96,true)
+
+    woodQuad({xb,ya+cut,za},{xa,ya+cut,za},
+             {xa,yb-cut,za},{xb,yb-cut,za},"dark",0.72,true)
+    woodQuad({xb-cut,ya,za},{xa+cut,ya,za},
+             {xa,ya+cut,za},{xb,ya+cut,za},"dark",0.72,true)
+    woodQuad({xb,yb-cut,za},{xa,yb-cut,za},
+             {xa+cut,yb,za},{xb-cut,yb,za},"dark",0.72,true)
+
+    local rim = {
+      { xa + cut, ya }, { xb - cut, ya },
+      { xb, ya + cut }, { xb, yb - cut },
+      { xb - cut, yb }, { xa + cut, yb },
+      { xa, yb - cut }, { xa, ya + cut },
+    }
+    local tones = {
+      { "dark", 0.72 }, { "body", 0.82 }, { "body", 0.88 },
+      { "light", 0.94 }, { "light", 1.00 }, { "light", 0.90 },
+      { "dark", 0.80 }, { "dark", 0.76 },
+    }
+    for i = 1, #rim do
+      local a, b = rim[i], rim[i % #rim + 1]
+      woodQuad({a[1],a[2],za},{b[1],b[2],za},
+               {b[1],b[2],zb},{a[1],a[2],zb},
+               tones[i][1],tones[i][2],false)
+    end
+  end
+
+  -- Pull the neutral swatches from the original sign art.  Sampling the
+  -- active atlas keeps Red/Blue/Yellow palettes and replacement ROM art
+  -- compatible without shipping a new texture.
+  local signTiles = forestSign and { 33, 34, 49, 50 }
+                               or { 70, 71, 86, 87 }
+  local function swatch(kind, fallback)
+    local best, bestScore = fallback, -math.huge
+    for _, tile in ipairs(signTiles) do
+      local sx = (tile % perRow) * 8
+      local sy = math.floor(tile / perRow) * 8
+      for py = 0, 7 do
+        for px = 0, 7 do
+          local r, g, b, a = data:getPixel(sx + px, sy + py)
+          if a == nil or a > 0.01 then
+            local hi = math.max(r, g, b)
+            local lo = math.min(r, g, b)
+            local lum = r * 0.299 + g * 0.587 + b * 0.114
+            local sat = hi - lo
+            local score
+            if kind == "paper" then
+              score = lum - sat * 0.20
+            elseif kind == "ink" then
+              score = -lum + sat * 0.05
+            else score = sat end
+            if score > bestScore then
+              bestScore = score
+              best = { (sx + px + 0.5) / atlasW,
+                       (sy + py + 0.5) / atlasH }
+            end
+          end
+        end
+      end
+    end
+    return best
+  end
+  -- TEST84's cool-band heuristic could land on another pale sign colour.
+  -- Find explicit blue and red texels across the active atlas instead: this
+  -- guarantees a readable Kanto header and Poké Ball on every supported ROM.
+  local function nearestAtlasColour(tr, tg, tb, fallback)
+    local best, bestDistance = fallback, math.huge
+    for py = 0, atlasH - 1 do
+      for px = 0, atlasW - 1 do
+        local r, g, b, a = data:getPixel(px, py)
+        local scale = math.max(r or 0, g or 0, b or 0, a or 0) > 1.001
+                      and 255 or 1
+        r, g, b = (r or 0) / scale, (g or 0) / scale, (b or 0) / scale
+        a = a == nil and 1 or a / scale
+        if a > 0.01 then
+          local distance = (r - tr) * (r - tr)
+                         + (g - tg) * (g - tg)
+                         + (b - tb) * (b - tb)
+          if distance < bestDistance then
+            bestDistance = distance
+            best = { (px + 0.5) / atlasW, (py + 0.5) / atlasH }
+          end
+        end
+      end
+    end
+    return best
+  end
+  local face = {
+    paper = swatch("paper", uv.light),
+    ink = swatch("ink", uv.dark),
+    accent = nearestAtlasColour(0.10, 0.43, 0.82, uv.body),
+    red = nearestAtlasColour(0.82, 0.12, 0.10, uv.dark),
+  }
+  local function panel(xa, ya, xb, yb, z, tone, shade)
+    quad({xa,ya,z},{xb,ya,z},{xb,yb,z},{xa,yb,z},
+         face[tone], shade or 1.0, false)
+  end
+  local function chamferedPanel(xa, ya, xb, yb, cut, z, tone, shade)
+    panel(xa, ya + cut, xb, yb - cut, z, tone, shade)
+    quad({xa+cut,ya,z},{xb-cut,ya,z},{xb,ya+cut,z},{xa,ya+cut,z},
+         face[tone],shade or 1.0,false)
+    quad({xa,yb-cut,z},{xb,yb-cut,z},{xb-cut,yb,z},{xa+cut,yb,z},
+         face[tone],shade or 1.0,false)
+  end
+
+  -- Compact 3x5 lettering stays crisp at the normal gameplay camera.  TEST86
+  -- includes the full Latin/digit set because each plaque now follows the
+  -- sign entry at its own cell instead of stamping ROUTE 01 everywhere.
+  local glyphs = {
+    A = { "010", "101", "111", "101", "101" },
+    B = { "110", "101", "110", "101", "110" },
+    C = { "111", "100", "100", "100", "111" },
+    D = { "110", "101", "101", "101", "110" },
+    E = { "111", "100", "110", "100", "111" },
+    F = { "111", "100", "110", "100", "100" },
+    G = { "111", "100", "101", "101", "111" },
+    H = { "101", "101", "111", "101", "101" },
+    I = { "111", "010", "010", "010", "111" },
+    J = { "001", "001", "001", "101", "111" },
+    K = { "101", "101", "110", "101", "101" },
+    L = { "100", "100", "100", "100", "111" },
+    M = { "101", "111", "111", "101", "101" },
+    N = { "101", "111", "111", "111", "101" },
+    R = { "110", "101", "110", "101", "101" },
+    O = { "111", "101", "101", "101", "111" },
+    P = { "110", "101", "110", "100", "100" },
+    Q = { "111", "101", "101", "111", "001" },
+    S = { "111", "100", "111", "001", "111" },
+    U = { "101", "101", "101", "101", "111" },
+    T = { "111", "010", "010", "010", "010" },
+    V = { "101", "101", "101", "101", "010" },
+    W = { "101", "101", "111", "111", "101" },
+    X = { "101", "101", "010", "101", "101" },
+    Y = { "101", "101", "010", "010", "010" },
+    Z = { "111", "001", "010", "100", "111" },
+    ["0"] = { "111", "101", "101", "101", "111" },
+    ["1"] = { "010", "110", "010", "010", "111" },
+    ["2"] = { "111", "001", "111", "100", "111" },
+    ["3"] = { "111", "001", "111", "001", "111" },
+    ["4"] = { "101", "101", "111", "001", "001" },
+    ["5"] = { "111", "100", "111", "001", "111" },
+    ["6"] = { "111", "100", "111", "101", "111" },
+    ["7"] = { "111", "001", "010", "010", "010" },
+    ["8"] = { "111", "101", "111", "101", "111" },
+    ["9"] = { "111", "101", "111", "001", "111" },
+  }
+  local function pixelWord(word, xa, yTop, size, gap, z, tone)
+    local cursor = xa
+    for letter = 1, #word do
+      local character = word:sub(letter, letter)
+      local rows = glyphs[character]
+      if rows then
+        for row, bits in ipairs(rows) do
+          local column = 1
+          while column <= #bits do
+            if bits:sub(column, column) == "1" then
+              local first = column
+              repeat column = column + 1
+              until column > #bits or bits:sub(column, column) ~= "1"
+              panel(cursor + (first - 1) * size,
+                    yTop - row * size,
+                    cursor + (column - 1) * size,
+                    yTop - (row - 1) * size,
+                    z, tone, 0.92)
+            else
+              column = column + 1
+            end
+          end
+        end
+      end
+      cursor = cursor + size * (rows and 3 or 1.5)
+      if letter < #word then cursor = cursor + gap end
+    end
+  end
+
+  local function pixelUnits(word)
+    local units = 0
+    for i = 1, #word do
+      units = units + (glyphs[word:sub(i, i)] and 3 or 1.5)
+      if i < #word then units = units + 0.75 end
+    end
+    return units
+  end
+
+  -- Preserve TEST85's ROUTE placement for short labels, but let longer names
+  -- use the free enamel to the right.  Text shrinks only as much as needed.
+  local function fittedWord(word, xa, xb, preferredCenter, yTop, maxSize,
+                            z, tone)
+    if type(word) ~= "string" or word == "" then return end
+    local units = pixelUnits(word)
+    if units <= 0 then return end
+    local size = math.min(maxSize, (xb - xa) / units)
+    local width = units * size
+    local start = preferredCenter - width * 0.5
+    if start < xa then start = xa end
+    if start + width > xb then start = xb - width end
+    pixelWord(word, start, yTop, size, size * 0.75, z, tone)
+  end
+
+  local function signAt(map, cx, cy)
+    local width = map.widthCells
+                  or (map.def and map.def.width and map.def.width * 2)
+    if width and type(map.signAt) == "table" then
+      local sign = map.signAt[cy * width + cx]
+      if sign then return sign end
+    end
+    for _, sign in ipairs((map.def and map.def.signs) or {}) do
+      if sign.x == cx and sign.y == cy then return sign end
+    end
+    return nil
+  end
+
+  local function cleanLine(text)
+    if type(text) ~= "string" then return nil end
+    text = text:gsub("é", "E"):gsub("É", "E")
+    local line = text:match("[^\r\n\f]+")
+    if not line then return nil end
+    line = line:upper():gsub("[^A-Z0-9 ]", " ")
+    line = line:gsub("%s+", " "):match("^%s*(.-)%s*$")
+    return line ~= "" and line or nil
+  end
+
+  -- Category words such as GYM commonly live below the first line (for
+  -- example, "CERULEAN CITY\nPOKEMON GYM").  Keep cleanLine for the short
+  -- display name, but scan the complete resolved message when classifying a
+  -- plaque so those signs do not fall back to a generic city label.
+  local function cleanText(text)
+    if type(text) ~= "string" then return nil end
+    text = text:gsub("é", "E"):gsub("É", "E")
+    text = text:upper():gsub("[^A-Z0-9 ]", " ")
+    text = text:gsub("%s+", " "):match("^%s*(.-)%s*$")
+    return text ~= "" and text or nil
+  end
+
+  local function mapLabel(map)
+    local id = tostring(map.id or (map.def and map.def.id) or ""):upper()
+    if id == "VIRIDIAN_FOREST" then return "VIRIDIAN", "FOREST" end
+    local route = id:match("^ROUTE_(%d+)$")
+    if route then return "ROUTE", tostring(tonumber(route) or route) end
+
+    for _, suffix in ipairs({ "CITY", "TOWN", "ISLAND" }) do
+      local place = id:match("^(.-)_" .. suffix .. "$")
+      if place then
+        return place:gsub("_", " "), suffix == "ISLAND" and "ISLE" or suffix
+      end
+    end
+    return "KANTO", "INFO"
+  end
+
+  -- Resolve the exact interactive sign line when the host exposes it.  The
+  -- map-id fallback keeps older Gen1Recomp builds safe, while the sign's text
+  -- key still identifies common GYM/MART/CENTER/TIPS plaques without access
+  -- to the dialogue table.
+  local function signLabel(map, cx, cy)
+    local fallback1, fallback2 = mapLabel(map)
+    local sign = signAt(map, cx, cy)
+    local key = tostring(sign and sign.text or ""):upper()
+    local line, resolved
+    if sign and sign.text and map.def and map.def.label then
+      local okGame, Game = pcall(require, "src.core.Game")
+      local data = okGame and Game and Game.data
+      if data and type(data.resolveText) == "function" then
+        local okText, text = pcall(data.resolveText, data,
+                                   map.def.label, sign.text)
+        if okText then
+          line = cleanLine(text)
+          resolved = cleanText(text)
+        end
+      end
+    end
+
+    local clue = (resolved or line or "") .. " " .. key
+    if clue:find("TRAINER", 1, true) and clue:find("TIP", 1, true) then
+      return "TRAINER", "TIPS"
+    elseif (clue:find("POKECENTER", 1, true)
+            or (clue:find("POKEMON", 1, true)
+                and clue:find("CENTER", 1, true))) then
+      return "POKE", "CENTER"
+    elseif clue:find("MART", 1, true) then
+      return "POKE", "MART"
+    elseif clue:find("GYM", 1, true) then
+      return fallback1, "GYM"
+    end
+
+    local route = line and line:match("ROUTE%s*(%d+)")
+    if route then return "ROUTE", tostring(tonumber(route) or route) end
+
+    if line then
+      local words = {}
+      for word in line:gmatch("[A-Z0-9]+") do words[#words + 1] = word end
+      if #words == 1 and #words[1] <= 10 then return words[1], nil end
+      if #words == 2 and #words[1] <= 10 and #words[2] <= 10 then
+        return words[1], words[2]
+      end
+    end
+    return fallback1, fallback2
+  end
+
+  S.legendarySignIds = S.legendarySignIds or {}
+  S.legendarySignLabels = S.legendarySignLabels or {}
   for _, node in ipairs(cells) do
     Budget.tick()
-    local x, z = node.cx * 16 + 8, node.cy * 16 + 8
-    -- Exact corrected TEST437 placement: all timber sits behind or outside
-    -- the forward authored slab and therefore cannot cover its white pixels.
-    box(x - 6.8, 0.0, z - 1.25, x - 4.7, 10.0, z + 2.65, true)
-    box(x + 4.7, 0.0, z - 1.25, x + 6.8, 10.0, z + 2.65, true)
-    box(x - 8.2, 5.7, z - 1.05, x - 6.4, 15.8, z + 2.85, true)
-    box(x + 6.4, 5.7, z - 1.05, x + 8.2, 15.8, z + 2.85, true)
-    box(x - 8.2, 14.6, z - 1.05, x + 8.2, 16.4, z + 2.85, true)
-    box(x - 8.2, 5.7, z - 1.05, x + 8.2, 7.4, z + 2.85, true)
+    local label1, label2 = signLabel(map, node.cx, node.cy)
+    local x, z = node.cx * 16 + 8, node.cy * 16 + 12
+    local mapId = tostring(map.id or (map.def and map.def.id) or ""):upper()
+    if mapId == "CERULEAN_CITY" and node.cx == 27 and node.cy == 21 then
+      -- The original one-tile marker sits immediately against the Gym's west
+      -- wall.  The wider Legendary plaque therefore looked wedged into the
+      -- building.  A quarter-cell westward shift leaves visible breathing
+      -- room while most of the board remains inside its interactive cell.
+      x = x - 4.0
+    end
+    local id = VisualObjects.id("BATTLE_ART_VOXEL_FORK",
+      "signpost", map.id, node.cx, node.cy)
+    activeVisualObjectId = id
+    if id then
+      S.legendarySignIds[id] = true
+      S.legendarySignLabels[id] = { label1, label2 }
+    end
+
+    -- Keep TEST84's approved broad, low footprint and single stout post.
+    box(x - 1.20, 0.0, z - 2.25, x + 1.20, 6.0, z - 0.95, true)
+    box(x - 1.70, 0.0, z - 2.50, x + 1.70, 0.75, z - 0.70, true)
+    chamferedBox(x - 6.75, 5.15, z - 2.55,
+                 x + 6.75, 12.85, z - 1.00, 0.75)
+    box(x - 7.25, 12.76, z - 2.80, x + 7.25, 13.40, z - 0.20, true)
+
+    -- The inset enamel follows the timber's clipped silhouette.  A guaranteed
+    -- blue band, block-built Poké Ball, and live location glyphs make the face
+    -- read as an authored Kanto wayfinder rather than a generic notice board.
+    local front = z - 0.96
+    chamferedPanel(x - 5.85, 6.15, x + 5.85, 11.95, 0.35,
+                   front, "paper", 1.00)
+    panel(x - 5.10, 10.75, x + 5.10, 11.42, front + 0.025,
+          "accent", 1.00)
+
+    -- Pale title ticks make the blue header visible even under dusk shading.
+    for _, tick in ipairs({
+      { -1.85, -0.68 }, { -0.34, 0.82 }, { 1.17, 2.25 },
+    }) do
+      panel(x + tick[1], 10.96, x + tick[2], 11.22,
+            front + 0.030, "paper", 1.00)
+    end
+
+    local ballX, ballY = x - 4.18, 8.70
+    panel(ballX - 0.70, ballY + 0.78, ballX + 0.70, ballY + 1.10,
+          front + 0.034, "ink", 0.92)
+    panel(ballX - 1.06, ballY - 0.78, ballX + 1.06, ballY + 0.78,
+          front + 0.034, "ink", 0.92)
+    panel(ballX - 0.70, ballY - 1.10, ballX + 0.70, ballY - 0.78,
+          front + 0.034, "ink", 0.92)
+    panel(ballX - 0.56, ballY + 0.48, ballX + 0.56, ballY + 0.78,
+          front + 0.038, "red", 1.00)
+    panel(ballX - 0.86, ballY + 0.08, ballX + 0.86, ballY + 0.48,
+          front + 0.038, "red", 1.00)
+    panel(ballX - 0.86, ballY - 0.48, ballX + 0.86, ballY - 0.08,
+          front + 0.038, "paper", 1.00)
+    panel(ballX - 0.56, ballY - 0.78, ballX + 0.56, ballY - 0.48,
+          front + 0.038, "paper", 1.00)
+    panel(ballX - 1.00, ballY - 0.11, ballX + 1.00, ballY + 0.11,
+          front + 0.042, "ink", 0.92)
+    panel(ballX - 0.29, ballY - 0.29, ballX + 0.29, ballY + 0.29,
+          front + 0.046, "ink", 0.92)
+    panel(ballX - 0.13, ballY - 0.13, ballX + 0.13, ballY + 0.13,
+          front + 0.050, "paper", 1.00)
+
+    if label2 then
+      fittedWord(label1, x - 2.70, x + 5.10, x + 0.28,
+                 9.62, 0.31, front + 0.036, "ink")
+      fittedWord(label2, x - 2.70, x + 5.10, x + 0.28,
+                 7.60, 0.24, front + 0.036, "ink")
+    else
+      fittedWord(label1, x - 2.70, x + 5.10, x + 0.28,
+                 9.18, 0.31, front + 0.036, "ink")
+    end
+
+    -- Four inset fasteners keep the plaque tactile without turning it into
+    -- another heavy frame.
+    for _, p in ipairs({
+      { -5.48, 6.50 }, { 5.13, 6.50 },
+      { -5.48, 11.48 }, { 5.13, 11.48 },
+    }) do
+      panel(x + p[1], p[2], x + p[1] + 0.28, p[2] + 0.28,
+            front + 0.035, "ink", 0.88)
+    end
   end
+  activeVisualObjectId = nil
   return true
 end
 
@@ -342,6 +769,12 @@ function Structures.forMap(map)
   local tw, th = def.width * 4, def.height * 4
   local x0, x1 = -RING, tw + RING - 1
   local y0, y1 = -RING, th + RING - 1
+  local legendaryViridian = CommunityVisuals.customForest()
+    and tileset.id == "FOREST"
+    and tostring(map.id or def.id or "") == "VIRIDIAN_FOREST"
+  local towerInterior = tileset.id == "CEMETERY"
+    and tostring(map.id or def.id or ""):upper():match("^POKEMON_TOWER_[1-7]F$")
+      ~= nil and CommunityVisuals.customTower()
 
   -- resolve the whole grid once: shape + tile per key. Ring positions use
   -- the same border override the 2D renderer draws with
@@ -375,8 +808,11 @@ function Structures.forMap(map)
   -- WATER and the other tilesets' own borders keep the full ring: a flat
   -- sheet of water is what water looks like from above anyway, and an
   -- interior's border is black already.
-  local hullRingOnly = borderBlk and def.tileset == "OVERWORLD"
-                       and (TileRenderer.voidFill or "trees") == "trees"
+  local hullRingOnly = borderBlk and (
+    (def.tileset == "OVERWORLD"
+      and (TileRenderer.voidFill or "trees") == "trees")
+    or legendaryViridian
+  )
   local tw2, th2 = tw, th
   local function tileLookup(tx, ty)
     if tx >= 0 and ty >= 0 and tx < tw2 and ty < th2 then
@@ -617,6 +1053,22 @@ function Structures.forMap(map)
       end
     end
 
+    -- The extraction above deliberately performs its normal ground synthesis
+    -- and sidecar annotation.  Under the Legendary option, replace only its
+    -- authored sign pixels with TEST85's complete marker; custom quads carry
+    -- the same public ID, so companion ownership/suppression still works.
+    if S.legendarySignIds then
+      local kept = {}
+      for _, q in ipairs(S.objectQuads) do
+        if q.legendarySign
+            or not (q.visualObjectId
+                    and S.legendarySignIds[q.visualObjectId]) then
+          kept[#kept + 1] = q
+        end
+      end
+      S.objectQuads = kept
+    end
+
     -- ---- profile-pinned fence posts: per-CELL standee slabs ----
     -- A fence line repeats one drawing for a dozen cells, and its art
     -- touches across cell seams. Pooled like a billboard the whole line
@@ -639,6 +1091,55 @@ function Structures.forMap(map)
         end
       end
     end
+
+    -- TEST125 replaces each Tower sprite-cutout grave with a compact carved
+    -- monument. The authored cell remains the source of placement/collision;
+    -- only its appearance changes. Chamfered shoulders, a pointed crown,
+    -- recessed plaque and layered plinth read cleanly at close camera angles.
+    local function towerGrave(node)
+      local quads = S.objectQuads
+      local mx, mz = node.cx * 16 + 8, node.cy * 16 + 8
+      local function face(a, b, c, d, shade)
+        quads[#quads + 1] = { a, b, c, d,
+          shade = shade or 1, towerMaterial = "grave" }
+      end
+      local function box(x0, y0, z0, x1, y1, z1, shade)
+        face({x1,y0,z0},{x1,y0,z1},{x1,y1,z1},{x1,y1,z0},(shade or 1)*.84)
+        face({x0,y0,z1},{x0,y0,z0},{x0,y1,z0},{x0,y1,z1},(shade or 1)*.68)
+        face({x0,y1,z0},{x1,y1,z0},{x1,y1,z1},{x0,y1,z1},(shade or 1)*1.08)
+        face({x0,y0,z1},{x1,y0,z1},{x1,y0,z0},{x0,y0,z0},(shade or 1)*.58)
+        face({x0,y0,z1},{x1,y0,z1},{x1,y1,z1},{x0,y1,z1},shade or 1)
+        face({x1,y0,z0},{x0,y0,z0},{x0,y1,z0},{x1,y1,z0},(shade or 1)*.76)
+      end
+
+      box(mx-6.2, 0.0, mz-4.5, mx+6.2, 1.7, mz+4.5, .76)
+      box(mx-5.2, 1.7, mz-3.8, mx+5.2, 3.1, mz+3.8, .90)
+      box(mx-4.3, 3.1, mz-2.0, mx+4.3, 10.8, mz+2.0, .98)
+
+      -- Six-sided crown extruded through the slab depth.
+      local outline = {
+        {mx-4.3,10.8},{mx-4.3,12.0},{mx-2.4,14.0},
+        {mx,15.0},{mx+2.4,14.0},{mx+4.3,12.0},{mx+4.3,10.8},
+      }
+      local center = {mx,12.35}
+      for i = 1, #outline - 1 do
+        local a, b = outline[i], outline[i+1]
+        face({center[1],center[2],mz+2.0},{a[1],a[2],mz+2.0},
+             {b[1],b[2],mz+2.0},{b[1],b[2],mz+2.0},1.02)
+        face({center[1],center[2],mz-2.0},{b[1],b[2],mz-2.0},
+             {a[1],a[2],mz-2.0},{a[1],a[2],mz-2.0},.74)
+        face({a[1],a[2],mz-2.0},{b[1],b[2],mz-2.0},
+             {b[1],b[2],mz+2.0},{a[1],a[2],mz+2.0},.88)
+      end
+
+      -- Shallow inset tablet and stone frame on the visible south face.
+      box(mx-3.05, 5.0, mz+2.01, mx+3.05, 9.65, mz+2.24, .70)
+      box(mx-3.55, 4.55, mz+2.25, mx-3.05, 10.05, mz+2.48, 1.10)
+      box(mx+3.05, 4.55, mz+2.25, mx+3.55, 10.05, mz+2.48, 1.10)
+      box(mx-3.55, 4.55, mz+2.25, mx+3.55, 5.05, mz+2.48, 1.10)
+      box(mx-3.55, 9.55, mz+2.25, mx+3.55, 10.05, mz+2.48, 1.10)
+    end
+
     if not Structures.buildCommunityFence(S, map, postCells) then
     for _, node in pairs(postCells) do
       local tiles = node.tiles
@@ -651,7 +1152,16 @@ function Structures.forMap(map)
         reg.minY = math.min(reg.minY, c[2])
         reg.maxY = math.max(reg.maxY, c[2])
       end
-      Structures.extractObjects(S, map, reg, data, perRow, "opaque")
+      if towerInterior then
+        -- Run extraction once so its established cell claiming and synthesized
+        -- ground remain intact, then replace only the generated pixel quads.
+        local first = #S.objectQuads + 1
+        Structures.extractObjects(S, map, reg, data, perRow, "opaque")
+        for i = #S.objectQuads, first, -1 do S.objectQuads[i] = nil end
+        towerGrave(node)
+      else
+        Structures.extractObjects(S, map, reg, data, perRow, "opaque")
+      end
     end
     end
 
@@ -1531,6 +2041,24 @@ end
 -- heap growth on a cross-region trek).
 local roundCache = {}
 
+-- Hidden Legendary crowns use their source hull only to publish the ground
+-- height that the replacement trunk stands on. Cache that one scalar with the
+-- shared template instead of making ChunkMesher revisit hundreds of invisible
+-- quads for every tree stamp and every rebuild.
+local function roundTemplateBase(tpl)
+  if tpl.baseY ~= nil then return tpl.baseY end
+  local baseY = math.huge
+  for _, q in ipairs(tpl.quads or {}) do
+    for i = 1, 4 do
+      local y = q[i] and q[i][2]
+      if y and y < baseY then baseY = y end
+    end
+    Budget.tick()
+  end
+  tpl.baseY = baseY < math.huge and baseY or 0
+  return tpl.baseY
+end
+
 function Structures.buildCylinders(S, map, x0, x1, y0, y1, groundTiles)
   local data = pixels(map.tileset)
   local tw, th = map.def.width * 4, map.def.height * 4
@@ -1623,8 +2151,13 @@ function Structures.buildCylinders(S, map, x0, x1, y0, y1, groundTiles)
                 ids[#ids + 1] = S.tileAt[keyOf(cx * 2 + dx, cy * 2 + dy)]
               end
             end
-            local sig = tsid .. "|g32|" .. gsig .. "|"
-                        .. table.concat(ids, ":")
+            local test377Forest = CommunityVisuals.customForest()
+              and tsid == "FOREST"
+              and tostring(map.id or "") == "VIRIDIAN_FOREST"
+            local sig = tsid .. "|g32|"
+                        .. (test377Forest and "test377-forest|"
+                            or "battle-art|")
+                        .. gsig .. "|" .. table.concat(ids, ":")
             local tpl = roundCache[sig]
             if not tpl then
               local tq, tbg = roundTemplate(S, map, data, cx, cy,
@@ -1639,6 +2172,11 @@ function Structures.buildCylinders(S, map, x0, x1, y0, y1, groundTiles)
                 nil, -- taperVox
                 true -- pinBase
               )
+              if test377Forest then
+                for _, q in ipairs(tq or {}) do
+                  for i = 1, 4 do q[i][2] = q[i][2] * 1.18 end
+                end
+              end
               tpl = { quads = tq, bg = tbg }
               roundCache[sig] = tpl
             end
@@ -1719,6 +2257,14 @@ function Structures.buildCylinders(S, map, x0, x1, y0, y1, groundTiles)
         local taper = s.class == "can" and canTaper or nil
         local enhancedSapling = s.class == "sapling"
                                 and CommunityVisuals.customCutTrees()
+        local forestBoulder = CommunityVisuals.customForest()
+          and tsid == "FOREST"
+          and tostring(map.id or "") == "VIRIDIAN_FOREST"
+          and s.class == "stump"
+          and S.tileAt[k] == 2
+          and S.tileAt[keyOf(cx * 2 + 1, cy * 2)] == 3
+          and S.tileAt[keyOf(cx * 2, cy * 2 + 1)] == 18
+          and S.tileAt[keyOf(cx * 2 + 1, cy * 2 + 1)] == 19
         local ground = false
         if data then
           local sig = tsid .. (cap and ("|c" .. cap) or "")
@@ -1743,6 +2289,7 @@ function Structures.buildCylinders(S, map, x0, x1, y0, y1, groundTiles)
           if granitePillar then sig = sig .. "|community_granite_pillar_v1" end
           if communityTree then sig = sig .. "|community_n64_memory_tree_v1" end
           if enhancedSapling then sig = sig .. "|community_cut_tree_test47" end
+          if forestBoulder then sig = sig .. "|viridian_boulder_source_test97" end
           local tpl = roundCache[sig]
           if not tpl then
             local tq, tbg = roundTemplate(S, map, data, cx, cy, groundTiles, 16, cap, nil, nil, base, tall, well, taper, true)
@@ -1750,7 +2297,13 @@ function Structures.buildCylinders(S, map, x0, x1, y0, y1, groundTiles)
           end
           ground = tpl.bg or false
           local stamp = { quads = tpl.quads, mx = cx * 16 + 8, mz = cy * 16 + 8 }
-          if granitePillar then
+          if granitePillar or communityTree or enhancedSapling then
+            stamp.baseY = roundTemplateBase(tpl)
+          end
+          if forestBoulder then
+            stamp.hideCrown = true
+            stamp.forestBoulder = true
+          elseif granitePillar then
             stamp.lift=0.01; stamp.hideCrown=true; stamp.keepTree=true
             local reg=rawget(_G,"__bav_granite_pillars"); if not reg then reg={}; _G.__bav_granite_pillars=reg end
             local mk=map.id or (map.def and map.def.id) or tostring(map); reg[mk]=reg[mk] or {}; reg[mk][cx.."|"..cy]=true
@@ -2303,6 +2856,9 @@ local function stairCell(S, map, data, cx, cy, s)
   local rise = h / STAIR_STEPS
   local runW = 16 / STAIR_STEPS
   local z0, z1 = mz, mz + 16
+  local towerMaterial = map.tileset and map.tileset.id == "CEMETERY"
+    and tostring(map.id or ""):upper():match("^POKEMON_TOWER_[1-7]F$")
+    and CommunityVisuals.customTower() and "stair" or nil
 
   -- corners run bottom-left, bottom-right, top-right, top-left as seen
   -- from outside (the mesher's side convention); art rect in cell space
@@ -2341,7 +2897,7 @@ local function stairCell(S, map, data, cx, cy, s)
           return {((tile%perRow)*8+x)/atlasW,(math.floor(tile/perRow)*8+y)/atlasH}
         end
         quads[#quads+1]={point(a,c),point(b,c),point(b,d),point(a,d),
-          uv={source(a,c),source(b,c),source(b,d),source(a,d)},shade=shade,stairSourceTile=tile}
+          uv={source(a,c),source(b,c),source(b,d),source(a,d)},shade=shade,stairSourceTile=tile,towerMaterial=towerMaterial}
       end end
       return
     end
@@ -3723,8 +4279,12 @@ end
 -- tile already renders. So the player walks BETWEEN the two rows, and
 -- the southern row occludes their feet the way the 2D grass overdraw
 -- did. Transparency respected: only the tuft strokes stand. Runs of
--- adjacent pixels merge into single quads, and one template per grass
--- tile id is stamped across the map (grass comes in fields).
+-- adjacent pixels merge into narrow CLOSED slabs, and one template per grass
+-- tile id is stamped across the map (grass comes in fields). Each painted
+-- stroke also gets a crossed centre card so camera turns cannot put an entire
+-- field edge-on.  The end caps matter: without them the front/back pair was
+-- still mathematically paper-thin from a side angle, so whole rows blinked as
+-- the camera crossed that angle even though the centre card softened it.
 --
 -- One tile is ONE standing piece, full height. The first cut split each
 -- tile again into its top and bottom four art rows and stood those at
@@ -3776,6 +4336,30 @@ local function grassTemplate(map, data, tileId)
           { ix, yTop, zB }, { ix2 + 1, yTop, zB },
           uv = { { u1, v1 }, { u0, v1 }, { u0, v0 }, { u1, v0 } },
           shade = 0.68,
+        }
+        quads[#quads + 1] = {           -- west end: close the slab
+          { ix, yBot, zB }, { ix, yBot, zF },
+          { ix, yTop, zF }, { ix, yTop, zB },
+          uv = { { u0, v1 }, { u0, v1 }, { u0, v0 }, { u0, v0 } },
+          shade = 0.72,
+        }
+        quads[#quads + 1] = {           -- east end: close the slab
+          { ix2 + 1, yBot, zF }, { ix2 + 1, yBot, zB },
+          { ix2 + 1, yTop, zB }, { ix2 + 1, yTop, zF },
+          uv = { { u1, v1 }, { u1, v1 }, { u1, v0 }, { u1, v0 } },
+          shade = 0.84,
+        }
+        -- Use the full authored stroke width on the perpendicular card.
+        -- TEST98's 0.75 compression left the narrowest grass strokes with
+        -- less than a pixel of side silhouette at the exact transition angle.
+        local xMid, crossScale = 4, 1.0
+        local crossZ0 = zMid + (ix - 4) * crossScale
+        local crossZ1 = zMid + (ix2 + 1 - 4) * crossScale
+        quads[#quads + 1] = {
+          { xMid, yBot, crossZ0 }, { xMid, yBot, crossZ1 },
+          { xMid, yTop, crossZ1 }, { xMid, yTop, crossZ0 },
+          uv = { { u0, v1 }, { u1, v1 }, { u1, v0 }, { u0, v0 } },
+          shade = 0.84,
         }
         -- blade tips: a top strip where the row above is clear
         if not opaque(ix, iy - 1) then
@@ -4034,6 +4618,7 @@ end
 -- Hull templates key on art content (tileset + tiles), which a block edit
 -- cannot change, so only the full drop clears them (atlas reload).
 function Structures.invalidate(mapId)
+  V.require("SaplingEdits").invalidate(mapId)
   if mapId then
     cache[mapId] = nil
   else

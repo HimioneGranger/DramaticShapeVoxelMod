@@ -214,6 +214,11 @@ BattleCam.still = false
 -- enables it: WHITE and GEN6 deliberately retain the normal steer and drift.
 BattleCam.poseLocked = false
 
+-- A dense authored arena may narrow the otherwise global pitch control.
+-- Reset restores this for every battle, so an opt-in forest limit cannot
+-- leak into the next route, room or cave.
+BattleCam.pitchLimit = 1
+
 BattleCam.t = 0
 
 -- Only the DRIFT's phase, so every fight opens on the same breath. Where
@@ -271,7 +276,7 @@ function BattleCam.seedFromFreeCamera()
   return true
 end
 
-function BattleCam.reset()
+function BattleCam.reset(arena)
   -- NOTE: the drift phase (BattleCam.t) is deliberately NOT reset here. The
   -- drift is a slow parallax breath that should continue from wherever the
   -- previous battle left it, so the camera opens on the same motion rather
@@ -283,7 +288,17 @@ function BattleCam.reset()
   -- that was explicitly steered do we keep that steered position instead.
   -- Either way the live values start where the goals are, so frame 1 already
   -- renders at the saved position -- no ease-in jump.
-  BattleCam.seedFromFreeCamera()
+  BattleCam.pitchLimit = math.max(0, math.min(1,
+    tonumber(arena and arena.pitchCap) or 1))
+  -- Viridian's normal solved tele shot is already the good-looking shot in
+  -- TEST102. The failure came after free-roam yaw/pitch were copied into it
+  -- and the eye was steered into the enlarged Legendary tree crowns. Safe
+  -- arenas therefore open on the proven authored pose instead.
+  if arena and arena.cameraSafe then
+    BattleCam.recentre()
+  else
+    BattleCam.seedFromFreeCamera()
+  end
   BattleCam.orbit = BattleCam.orbitGoal
   BattleCam.pitch = BattleCam.pitchGoal
   BattleCam.zoom  = BattleCam.zoomGoal
@@ -303,7 +318,9 @@ end
 -- is left to a quarter turn is the room the player has.
 function BattleCam.orbitRange(arena)
   local R = BattleCam.rigFor(arena)
-  return math.max(0, math.pi / 2 - math.atan2(R.side, R.back))
+  local range = math.max(0, math.pi / 2 - math.atan2(R.side, R.back))
+  local cap = tonumber(arena and arena.orbitCap) or 1
+  return range * math.max(0, math.min(1, cap))
 end
 
 -- ------- what the player's inputs reach
@@ -317,7 +334,8 @@ end
 local function setAxis(key, goal)
   if not BattleCam.steerable or BattleCam.poseLocked then return false end
   local was = BattleCam[key]
-  BattleCam[key] = math.max(0, math.min(1, goal))
+  local limit = (key == "pitchGoal") and BattleCam.pitchLimit or 1
+  BattleCam[key] = math.max(0, math.min(limit, goal))
   return BattleCam[key] ~= was
 end
 

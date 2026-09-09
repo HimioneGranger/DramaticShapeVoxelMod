@@ -17,3 +17,17 @@ assets/battle/**
 assets/world-fill/fieldsafari.png
 assets/world-fill/grassyforest.png
 assets/world-fill/rockycave.png
+
+# Local Legendary Cave Update media; supplied separately from source.
+/lib/amb-cave.mp3
+/lib/backdrop.png
+/lib/backdrop4.png
+/lib/sfx-cavestep.mp3
+/lib/tower_aged_wood.png
+/lib/tower_counter_top_pearl.png
+/lib/tower_grave_stone.png
+/lib/tower_honed_floor.png
+/lib/tower_luxury_granite.png
+/lib/tower_reference_wall.png
+/lib/tower_wall_pearl_white.png
+/lib/tower_wall_storm_white.png

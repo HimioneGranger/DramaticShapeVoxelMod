@@ -1,3 +1,23 @@
+# Legendary Cave Update integration — 2026-09-09
+
+Merged the supplied Legendary Cave Update into the clean `Legendary-Updates`
+checkout at `335bef0`, using verified upstream tag 1.10.3 (`278862b`) as the
+three-way base. Changes remain uncommitted; no push or game deployment.
+See [the merge report](docs/LEGENDARY_CAVE_MERGE.md) for the file inventory,
+conflict decisions, exact validation scope, local media and remaining checks.
+
+Retained newer interface/title, museum/Safari, companion atmosphere, reflection,
+heal and Cut integrations. Combined cache streams use revision 37 (new derived
+cache build required). Tower defaults to Battle Art; saved Legendary trees keep
+full detail and FAST is separate. Supplied PNG/MP3 files remain local in lib/,
+excluded from Git; assets/ was not changed. The source input is untouched.
+
+All 128 production Lua files compile. Eighteen standalone/mocked regression
+commands pass, including 19 new cache/OFF/UV/setting merge checks. Existing
+engine-dependent and real-map cave tests remain unavailable without their
+engine/fixtures; Android gameplay and GPU visuals have not been verified here.
+Donor TEST102–137 notes and all earlier handoff results remain historical.
+
 # PR #51 merge verification — 2026-09-08
 
 Merged PR head `1e07e7f` into current master `22f5b03` in an isolated worktree.

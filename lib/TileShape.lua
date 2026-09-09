@@ -140,9 +140,9 @@ local FALLBACK_HEIGHTS = {
 --              stands alone in its own depth band -- a north-south fence
 --              line is a march of separate posts, not one tall drawing
 --              (which is what a shared cluster would make of it)
---   grass      tall grass: flat ground PLUS two thin standing rows of
---              tufts per tile (the art's top and bottom halves), each at
---              its drawn depth -- the player walks between them
+--   grass      tall grass: flat ground PLUS four 8x8 tuft tiles per cell;
+--              each keeps its north/south depth and a crossed centre card,
+--              so camera turns cannot make the field disappear edge-on
 local ART = {
   ground = "flat",
   water = "flat",
@@ -239,6 +239,15 @@ local function customCutTrees()
   end
   return communityVisuals and communityVisuals.customCutTrees
          and communityVisuals.customCutTrees() or false
+end
+
+local function customTower()
+  if communityVisuals == nil then
+    local ok, value = pcall(V.require, "CommunityVisuals")
+    communityVisuals = ok and value or false
+  end
+  return communityVisuals and communityVisuals.customTower
+         and communityVisuals.customTower() or false
 end
 
 -- The shape profile ships with the mod (data/voxel_heights.lua) and is read
@@ -392,6 +401,12 @@ function TileShape.forMap(map)
   local profile = load()
   local base = profile and profile.tilesets and profile.tilesets[id]
   local perMap = profile and profile.maps and profile.maps[map.id]
+  local towerMap = id == "CEMETERY"
+    and tostring(map.id or ""):upper():match("^POKEMON_TOWER_[1-7]F$") ~= nil
+  -- TEST121's 64px wall override is part of the Legendary Tower conversion.
+  -- The master switch must restore Battle Art's original CEMETERY profile,
+  -- not merely put the old texture on the taller custom room.
+  if towerMap and not customTower() then perMap = nil end
   local positionRules = (perMap and perMap.warp_stairs) or (base and base.warp_stairs)
   local cacheKey = (perMap or positionRules) and (tostring(id) .. ":" .. tostring(map.id)) or id
   if cache[cacheKey] then return cache[cacheKey] end

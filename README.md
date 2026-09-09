@@ -1,5 +1,7 @@
 # Battle Art Voxel Fork
 
+**TEST137 Tower master and wall finishes:** adds a true **TOWER VISUALS** A/B switch as the first row in **LEGENDARY VISUALS → POKEMON TOWER**. `BATTLE ART` restores the original Tower atlas, wall height, floor, counter, graves and stairs and disables the added fog/details; `LEGENDARY VISUALS` restores the complete Tower conversion. A new **TOWER WALL** row selects the existing dark `SMOKE BLACK` granite or the new 2048px `STORM WHITE` and `PEARL WHITE` reference-matched slabs. TEST137 also closes claimed grave-floor gaps in staged battles so the blue scene void cannot show between monuments. Keep **Grass and Flowers TEST4** and **Battle Cinematics TEST5** as the companion mods. See [TEST137 notes](docs/TEST137.md).
+
 Battle Art Voxel Fork turns the overworld of the [Pokémon Gen 1 Recompilation Project](https://github.com/bryanthaboi/pokemon-gen1-recomp-project) into a 3D voxel diorama and stages battles inside that world. It also provides configurable static and animated battle sprites, arena backdrops, trainer art, first-person exploration, water reflections, lighting, and compatibility hooks for other presentation mods.
 
 Version 1.9.0 supports Pokémon Red, Blue, and Yellow on Gen1Recomp `0.1.69` through current pre-2.0 releases. It is intentionally declared as a Gen 1 mod; Pokémon Gold uses different engine modules and needs a real port rather than a manifest change. See the [Gen 1 and Gen 2 differences and porting guide](docs/GEN1_GEN2_DIFFERENCES.md).
@@ -7,6 +9,7 @@ Version 1.9.0 supports Pokémon Red, Blue, and Yellow on Gen1Recomp `0.1.69` thr
 ## Highlights
 
 - Extruded terrain, buildings, foliage, figures, depth-buffered occlusion, cast shadows, and optional tilt-shift and world curvature.
+- Cavern walls and ledge risers use amplified continuous geology—deep warped strata, recessed fissures, eroded crags, and a heavy broken wall-to-floor transition—while both low ground and raised walkable corridors use dark, flat-shaded compacted dirt packed with dense, irregular soil speckles. FULL cave detail adds restrained irregular torch falloff, rock-blended water sources, animated 3D droplets, organic multi-lobed pools and ripples, drifting mineral motes, solid stalactites, and a high-vaulted continuous faceted ceiling with refined naturally fused hanging clusters and a battle-safe arena opening.
 - Voxel water with waves and sky reflections; FULL reflections also include visible shoreline, trees, buildings, and characters.
 - First-person free look and analog movement while retaining the engine's collision, encounter, warp, ledge, and script behavior.
 - Battles staged over the current map with an over-the-shoulder camera, parallax, depth of field, configurable HUDs, and optional Gen 6-style backdrops.
@@ -60,7 +63,20 @@ Key visual controls include:
 | `DAYTIME` | `SYNC`, `DAY`, `NIGHT`, `DUSK`, `DAWN`, `CYCLE` | Controls outdoor lighting and sky time |
 | `LEGENDARY PILLARS` | `BATTLE ART`, `SEPARATE`, `BOTTOM LINK`, `TOP INTERLOCK` | Selects the original or community granite pillar layout |
 | `WALL & LEDGE COLOR` | `GRANITE`, `RED BRICK`, `SANDSTONE`, `SLATE` | Selects Legendary masonry material |
+| `CAVES` | `BATTLE ART`, `LEGENDARY VISUALS` | Selects the original cave or the natural rock walls and dark granular dirt path |
+| `CAVE DETAILS` | `OFF`, `SUBTLE`, `FULL` | Adds animated 3D wall torches on dark forged-charcoal hardware with layered iron tones and a heat-warmed burner rim, plus sampled-height amber floor falloff, compact patch-sourced teardrop droplets, layered wet landings, faceted rubble, stalagmites and drifting low-poly moisture motes; FULL adds tiny embers, denser solid upper-wall stalactite clusters, rare fused columns, Waterworks-inspired irregular pools with defined shores, animated shimmer and ripples, brighter droplet splashes, low damp haze, and a high-vaulted welded low-poly roof visible from first- and third-person cameras. Refined asymmetrical stalactites descend directly from that roof into the black overhead void with no floating caps. Exploration draws the complete seamless canopy, battles retain its surrounding sections while opening the arena itself, and orbit views hide both the roof and its attached clusters together. Torch-near formations and motes receive warm highlights, and walls remain solid with no transparent ghosting overlays. |
+| `CAVE SOUND` | `OFF`, `LOW`, `MID` | Adds optional cave ambience plus an audible rock footstep on each 8-pixel Gen 1 tile step, loaded directly from packaged or unpacked installs independently of cave geometry |
+| `TOWER VISUALS` | `BATTLE ART`, `LEGENDARY VISUALS` | Master A/B switch for all added Pokemon Tower materials, taller walls, modeled counter/stairs/graves, fog, and detail passes |
+| `TOWER WALL` | `SMOKE BLACK`, `STORM WHITE`, `PEARL WHITE` | Selects one of three continuous 2048px luxury-granite wall slabs while Tower Visuals is enabled |
+| `TOWER DETAILS` | `OFF`, `SUBTLE`, `FULL` | Controls high Tower sconces, living wall light, embers, and the reception counter's brass accent independently of fog |
+| `TOWER FOG` | `OFF`, `ON` | Toggles the connected white-grey rolling fog on Pokemon Tower grave floors; reception remains clear |
+| `FOG THICKNESS` | `LIGHT`, `NORMAL`, `THICK`, `HEAVY` | Changes Tower fog opacity and vertical body without widening its grave-zone footprint |
+| `FOG SPEED` | `SLOW`, `NORMAL`, `FAST` | Changes Tower drift, breathing, and evaporation speed without jumping animation phase |
 | `TREES` | `BATTLE ART`, `LEGENDARY VISUALS` | Selects the original or community S/M/L/XL tree family |
+| `SIGNS` | `BATTLE ART`, `LEGENDARY VISUALS` | Selects stock sign art or the low horizontal Kanto wayfinders with clipped timber, enamel faces, Poké Ball badges and live route/town/facility labels, now including Viridian Forest; Cerulean Gym receives dedicated wall clearance |
+| `SKY & BACKGROUND` | `BATTLE ART`, `LEGENDARY VISUALS` | Adds the seamless sky, deep Legendary night, animated stars, painted mountains, and distant Kanto terrain |
+| `VIRIDIAN FOREST` | `BATTLE ART`, `LEGENDARY VISUALS` | Adds the authored taller tree layout, stitched canopy, layered haze, animated leaves, varied moss-and-litter floor, camera-stable crossed grass and deterministic mossy boulders in Viridian Forest |
+| `FOREST FX` | `LOW`, `OFF` | Enables or disables the approved Viridian haze and guarded depth-aware light shafts |
 
 `WORLD FILL` controls empty space below and outside the world:
 

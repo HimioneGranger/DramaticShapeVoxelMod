@@ -14,6 +14,7 @@
 local V = ...
 
 local Budget = V.require("BuildBudget")
+local Timings = V.require("LoadTimings")
 local StaticGeometry = V.require("StaticGeometry")
 local Version = require("src.core.Version")
 local Platform = require("src.core.Platform")
@@ -68,9 +69,19 @@ local STATIC_PLAYTHROUGH = "bavc_static_mesh_v2"
 -- Jagged TEST38 masonry, ordinary floors and the distant perimeter are locked.
 -- Revision 31 adds explicit rear entrances, clean rear facades, cave exit
 -- portals and hanging scrolls while retaining the current disk-record layout.
--- Revision 34 combines upstream museum/Safari/interior geometry (33) with
--- restored prop-span records and PR #41 ladders; neither old cache is reusable.
-Disk.CACHE_REVISION = 34
+-- Revision 32 rejects stale lower-floor cave records. Revision 33 also routes
+-- the raised walkable CAVERN shelf through dirt. Revision 34 darkens only the
+-- dirt vertex response while preserving the approved walls and grain layout.
+-- TEST66 keys that work behind the opt-in CAVES setting, so Battle Art and
+-- Legendary Visuals can never reuse one another's derived cave meshes.
+-- Revision 35 seals the natural cave facets against a continuous rock backing.
+-- Revision 36 extends each terrain record with the small suppressible-visual
+-- streams and Legendary placement registry that were previously session-only.
+-- Cached terrain can now restore signs, trees and pillars without rerunning the
+-- complete Structures/terrain pipeline at every cold map crossing.
+-- Revision 37 combines these streams with upstream prop spans, restored
+-- ladders and museum/Safari geometry. Neither parent cache is reusable.
+Disk.CACHE_REVISION = 37
 -- Patch releases which do not change emitted vertices must keep the existing
 -- world cache usable. This token matches the first static-mesh-cache-v2 build;
 -- CACHE_REVISION, not the public mod version, owns geometry compatibility.
@@ -202,6 +213,9 @@ local function legacyName(key)
   if product == "body-terrain" then
     return LEGACY_ROOT .. "/" .. id .. ".body.terrain.bavc"
   end
+  if product:match("^tree%-%w[%w_-]*%-%w[%w_-]*$") then
+    return LEGACY_ROOT .. "/" .. id .. "." .. product .. ".bavc"
+  end
   return nil
 end
 
@@ -212,6 +226,10 @@ local function legacyKey(name)
   if id then return LOGICAL_DIRECTORY .. "/" .. id .. "/full-terrain" end
   id = name:match("^(.-)%.body%.terrain%.bavc$")
   if id then return LOGICAL_DIRECTORY .. "/" .. id .. "/body-terrain" end
+  local treeId, product = name:match("^(.-)%.(tree%-.+)%.bavc$")
+  if treeId and product then
+    return LOGICAL_DIRECTORY .. "/" .. treeId .. "/" .. product
+  end
   return nil
 end
 
@@ -479,12 +497,47 @@ function Disk.fingerprint(map, slot, masks, kind)
   parts[#parts + 1] = "legendary-visuals-final"
   parts[#parts + 1] = CommunityVisuals.layout()
   parts[#parts + 1] = CommunityVisuals.trees:get()
+  parts[#parts + 1] = CommunityVisuals.forest:get()
+  if CommunityVisuals.customForest() then
+    parts[#parts + 1] = "viridian-finished-ring-and-varied-boulders-v2"
+  end
   parts[#parts + 1] = CommunityVisuals.cutTrees:get()
   parts[#parts + 1] = CommunityVisuals.signs:get()
+  -- TEST83 changes only the opted-in Legendary sign support geometry.  Name
+  -- that contract directly instead of invalidating Battle Art/default maps
+  -- with a global cache-revision bump.
+  if CommunityVisuals.customSigns() then
+    parts[#parts + 1] = "kanto-wayfinder-viridian-v6"
+    parts[#parts + 1] = "sign-labels"
+    for _, sign in ipairs(def.signs or {}) do
+      parts[#parts + 1] = tostring(sign.x)
+      parts[#parts + 1] = tostring(sign.y)
+      parts[#parts + 1] = tostring(sign.text)
+    end
+  end
   parts[#parts + 1] = CommunityVisuals.grass:get()
+  if kind == "aux" then
+    -- TEST105 restores closed grass strokes while retaining TEST104's
+    -- camera-safe Viridian framing. Force a clean auxiliary mesh rebuild.
+    parts[#parts + 1] = "closed-tall-grass-v4-camera-safe"
+  end
   parts[#parts + 1] = CommunityVisuals.roads:get()
+  local mapId = tostring(map.id or ""):upper()
+  if mapId == "LAVENDER_TOWN" then
+    parts[#parts + 1] = "lavender-charcoal-purple-ground-v2"
+  elseif mapId:match("^POKEMON_TOWER_[1-7]F$") then
+    parts[#parts + 1] = "pokemon-tower-stone-v14-master-wall-blue-void"
+    parts[#parts + 1] = CommunityVisuals.tower:get()
+    parts[#parts + 1] = CommunityVisuals.towerWallStyle()
+  end
   parts[#parts + 1] = CommunityVisuals.walls:get()
   parts[#parts + 1] = CommunityVisuals.courtyards:get()
+  -- TEST65 keeps TEST64's all-walkable dirt routing and dense grain, but uses
+  -- a deeper earth palette and lower floor-only light response.
+  if tileset.id == "CAVERN" or def.tileset == "CAVERN" then
+    parts[#parts + 1] = CommunityVisuals.caves:get()
+    parts[#parts + 1] = "cave-geological-strata-v10-dark-dirt"
+  end
   -- VOID FILL (trees vs black) only changes the apron ring that sits in the
   -- FULL slot (see Structures.lua hullRingOnly / RING). The BODY slot builds
   -- r=0 (no ring) so its vertices never vary with void fill, and AUX carries
@@ -526,6 +579,22 @@ local function pathFor(map, slot, kind)
   local suffix = kind == "aux" and kindSegment(kind)
                  or (tostring(slot) .. "-terrain")
   return Disk.DIRECTORY .. "/" .. safeId(map.id) .. "/" .. suffix
+end
+
+-- TEST97 persists the already-expanded mature-tree triangle streams beside
+-- the terrain containers.  Keep each current/neighbor placement signature in
+-- its own path: a map's FULL owner can suppress trees beneath connected map
+-- bodies while the same map drawn as a neighbour must keep its complete body.
+local TREE_MATERIALS = { "trunks", "stones", "hoods", "detail", "shadows" }
+local function treePath(map, recipe, signature)
+  return Disk.DIRECTORY .. "/" .. safeId(map.id) .. "/tree-"
+         .. safeId(recipe) .. "-" .. safeId(signature)
+end
+
+local function treeFingerprint(map, recipe, signature)
+  return Disk.fingerprint(map, "body", nil, "trees")
+         .. "|tree-stream-v1|recipe|" .. tostring(recipe)
+         .. "|placement|" .. tostring(signature)
 end
 
 local function physicalPath(path)
@@ -821,7 +890,7 @@ end
 -- already read or written during this session.
 function Disk.stats()
   local out = { bytes = 0, files = 0, maps = 0,
-                aux = 0, full = 0, body = 0 }
+                aux = 0, full = 0, body = 0, trees = 0 }
   if not storage or not available() then return out end
   local ok, names = pcall(storage.list, storage, Disk.DIRECTORY)
   if not ok then return out end
@@ -837,6 +906,7 @@ function Disk.stats()
               or name:match("^(.-)/aux$")
               or name:match("^(.-)/full%-terrain$")
               or name:match("^(.-)/body%-terrain$")
+              or name:match("^(.-)/tree%-.+$")
       if id then maps[id] = true end
       if name:match("/deco$") or name:match("/aux$") then
         out.aux = out.aux + 1
@@ -844,6 +914,8 @@ function Disk.stats()
         out.full = out.full + 1
       elseif name:match("/body%-terrain$") then
         out.body = out.body + 1
+      elseif name:match("/tree%-.+$") then
+        out.trees = out.trees + 1
       end
     end
   end
@@ -851,7 +923,7 @@ function Disk.stats()
   return out
 end
 
-local function streamRecord(blob, pos)
+local function streamRecord(blob, pos, yieldFn)
   local n = readU32(blob, pos)
   if not n then return nil end
   local chunks = readU32(blob, pos + 4)
@@ -885,6 +957,7 @@ local function streamRecord(blob, pos)
     total = total + rawBytes
     pos = first + packedBytes
     Budget.check()
+    if yieldFn then yieldFn() end
   end
   if total ~= expected or (expected == 0 and chunks ~= 0) then return nil end
   return { n = n, chunks = rawChunks }, pos
@@ -942,15 +1015,47 @@ function Disk.loadTerrain(map, slot, masks)
   local blob, pos = readValidated(path, fp, map)
   if not blob then return nil end
   local terrain, nextPos = streamRecord(blob, pos)
-  local water, afterWater
-  if nextPos then water, afterWater = streamRecord(blob, nextPos) end
-  local spans, finalPos
-  if afterWater then spans, finalPos = readSpans(blob, afterWater) end
-  if not terrain or not water or not spans or finalPos ~= #blob + 1 then
+  local water, visualPos
+  if nextPos then water, visualPos = streamRecord(blob, nextPos) end
+  local visualCount = visualPos and readU32(blob, visualPos) or nil
+  if not terrain or not water or not visualCount or visualCount > 4096 then
     discard(path, true)
     return nil
   end
-  return { terrain = terrain, water = water, spans = spans }
+  pos = visualPos + 4
+  local visuals = {}
+  for _ = 1, visualCount do
+    local nameBytes = readU32(blob, pos)
+    if not nameBytes or nameBytes == 0 or nameBytes > 4096
+       or pos + 4 + nameBytes - 1 > #blob then
+      discard(path, true)
+      return nil
+    end
+    local id = blob:sub(pos + 4, pos + 3 + nameBytes)
+    local stream, nextVisual = streamRecord(blob, pos + 4 + nameBytes)
+    if not stream or visuals[id] then
+      discard(path, true)
+      return nil
+    end
+    visuals[id] = stream
+    pos = nextVisual
+  end
+  local registryBytes = readU32(blob, pos)
+  if not registryBytes or registryBytes > 8 * 1024 * 1024
+     or pos + 4 + registryBytes - 1 > #blob then
+    discard(path, true)
+    return nil
+  end
+  local registry = blob:sub(pos + 4, pos + 3 + registryBytes)
+  local finalPos = pos + 4 + registryBytes
+  local spans
+  spans, finalPos = readSpans(blob, finalPos)
+  if not spans or finalPos ~= #blob + 1 then
+    discard(path, true)
+    return nil
+  end
+  return { terrain = terrain, water = water,
+           visuals = visuals, registry = registry, spans = spans }
 end
 
 local function float4(blob, pos)
@@ -994,9 +1099,60 @@ function Disk.loadAux(map)
   return { grass = grass, flowers = flowers, figures = figures }
 end
 
+-- Load mature-tree sections as raw unindexed six-float streams.  GPU meshes
+-- are deliberately reconstructed by CommunityFlora under its own four-ms
+-- frame budget; a cache hit therefore avoids both the procedural crown build
+-- and an unbounded upload on the render thread.
+function Disk.loadTreeParts(map, recipe, signature, yieldFn)
+  if not Disk.staticEligible(map) then return nil end
+  local path = treePath(map, recipe, signature)
+  local fp = treeFingerprint(map, recipe, signature)
+  local blob, pos = readValidated(path, fp, map)
+  if not blob then return nil end
+  local treeCount = readU32(blob, pos)
+  local treeN = treeCount and readU32(blob, pos + 4)
+  local boulderN = treeN and readU32(blob, pos + 8)
+  local cellCount = boulderN and readU32(blob, pos + 12)
+  if not treeCount or not treeN or not boulderN or not cellCount
+     or cellCount > 65536 then discard(path, true); return nil end
+  pos = pos + 16
+  local cells = {}
+  for i = 1, cellCount do
+    local meta, nextPos = float4(blob, pos)
+    if not meta then discard(path, true); return nil end
+    cells[#cells + 1] = {
+      meta[1], meta[2], meta[3] == 1 and "b" or "t",
+      meta[4] > -1e20 and meta[4] or nil,
+    }
+    pos = nextPos
+    if yieldFn and i % 128 == 0 then yieldFn() end
+  end
+  local count = readU32(blob, pos)
+  if not count or count > 4096 then discard(path, true); return nil end
+  pos = pos + 4
+  local parts = {}
+  for _ = 1, count do
+    local meta, nextPos = float4(blob, pos)
+    if not meta then discard(path, true); return nil end
+    pos = nextPos
+    local part = { x = meta[1], y = meta[2], z = meta[3], radius = meta[4] }
+    for _, name in ipairs(TREE_MATERIALS) do
+      local stream
+      stream, pos = streamRecord(blob, pos, yieldFn)
+      if not stream then discard(path, true); return nil end
+      part[name] = stream
+    end
+    parts[#parts + 1] = part
+    if yieldFn then yieldFn() end
+  end
+  if pos ~= #blob + 1 then discard(path, true); return nil end
+  return { parts = parts, count = treeCount, tN = treeN, bN = boulderN,
+           cells = cells }
+end
+
 local function write(file, bytes) file:write(bytes) end
 
-local function writeChunked(file, record)
+local function writeChunked(file, record, yieldFn)
   local n = record and record.n or 0
   write(file, u32(n or 0))
   local bytes = (n or 0) * 6 * 4
@@ -1015,6 +1171,7 @@ local function writeChunked(file, record)
       write(file, packed)
       offset = offset + count
       Budget.check()
+      if yieldFn then yieldFn() end
     end
     return true
   end
@@ -1028,6 +1185,7 @@ local function writeChunked(file, record)
     write(file, packed)
     emitted = emitted + count
     Budget.check()
+    if yieldFn then yieldFn() end
   end
   for _, chunk in ipairs(record.chunks) do
     pending = pending .. chunk
@@ -1171,13 +1329,30 @@ local function writeSpans(file, spans)
   end
 end
 
-function Disk.saveTerrain(map, slot, masks, terrain, water)
+function Disk.saveTerrain(map, slot, masks, terrain, water, visuals, registry)
   if not Disk.staticEligible(map) then return false end
   local path = pathFor(map, slot, "terrain")
   local fp = Disk.fingerprint(map, slot, masks, "terrain")
   return writeFile(path, fp, function(file)
     writeChunked(file, terrain)
     writeChunked(file, water)
+    local ids = {}
+    for id, stream in pairs(type(visuals) == "table" and visuals or {}) do
+      if type(id) == "string" and id ~= "" and stream then
+        ids[#ids + 1] = id
+      end
+    end
+    table.sort(ids)
+    write(file, u32(#ids))
+    for _, id in ipairs(ids) do
+      write(file, u32(#id))
+      write(file, id)
+      writeChunked(file, visuals[id])
+      Budget.check()
+    end
+    registry = type(registry) == "string" and registry or ""
+    write(file, u32(#registry))
+    write(file, registry)
     writeSpans(file, terrain and terrain.spans)
   end)
 end
@@ -1201,6 +1376,33 @@ function Disk.saveAux(map, aux)
     end
     writeSpans(file, aux.grass and aux.grass.spans)
     writeSpans(file, aux.flowers and aux.flowers.spans)
+  end)
+end
+
+function Disk.saveTreeParts(map, recipe, signature, parts, yieldFn)
+  if not Disk.staticEligible(map) then return false end
+  parts = parts or {}
+  local path = treePath(map, recipe, signature)
+  local fp = treeFingerprint(map, recipe, signature)
+  return writeFile(path, fp, function(file)
+    write(file, u32(parts.count or 0))
+    write(file, u32(parts.tN or 0))
+    write(file, u32(parts.bN or 0))
+    write(file, u32(#(parts.cells or {})))
+    for i, cell in ipairs(parts.cells or {}) do
+      write(file, f32x4(cell[1], cell[2], cell[3] == "b" and 1 or 0,
+                        cell[4] == nil and -1e30 or cell[4]))
+      if yieldFn and i % 128 == 0 then yieldFn() end
+    end
+    write(file, u32(#(parts.parts or {})))
+    for _, part in ipairs(parts.parts or {}) do
+      write(file, f32x4(part.x, part.y, part.z, part.radius))
+      for _, name in ipairs(TREE_MATERIALS) do
+        assert(writeChunked(file, part[name], yieldFn))
+      end
+      if yieldFn then yieldFn() end
+      Budget.check()
+    end
   end)
 end
 
@@ -1245,5 +1447,21 @@ function Disk.purge()
   ramFiles, ramDirty, ramBytes, ramRejected, ramGenerated = {}, {}, 0, {}, {}
   return removed
 end
+
+-- Wrapping complete cache stages avoids per-byte/per-vertex timer overhead.
+-- streamRecord and writeChunked may yield; the owning pump pauses the clock.
+readValidated = Timings.wrap("cache_read", readValidated)
+streamRecord = Timings.wrap("cache_decode", streamRecord)
+writeChunked = Timings.wrap("cache_encode", writeChunked)
+encoded = Timings.wrap("cache_encode", encoded)
+writePersistent = Timings.wrap("cache_write", writePersistent)
+Disk.fingerprint = Timings.wrap("cache_other", Disk.fingerprint)
+Disk.loadTerrain = Timings.wrap("cache_other", Disk.loadTerrain)
+Disk.loadAux = Timings.wrap("cache_other", Disk.loadAux)
+Disk.loadTreeParts = Timings.wrap("cache_other", Disk.loadTreeParts)
+Disk.saveTerrain = Timings.wrap("cache_other", Disk.saveTerrain)
+Disk.saveAux = Timings.wrap("cache_other", Disk.saveAux)
+Disk.saveTreeParts = Timings.wrap("cache_other", Disk.saveTreeParts)
+Disk.saveRamToDisk = Timings.wrap("cache_other", Disk.saveRamToDisk)
 
 return Disk

@@ -1,5 +1,5 @@
 -- FLORA: grass with height to it, and the small moving things.
--- payload-version: 66
+-- payload-version: 67
 --
 -- TUFTS.  Dramatic Shape stands two thin rows of grass per tile, evenly,
 -- which is honest to the art and reads as a lawn.  Tall grass in this
@@ -605,6 +605,241 @@ end
 -- Shared by what works across a boundary: the neighbouring-map draws,
 -- the distance haze and the backs of buildings.
 local MOUND = {}
+MOUND.Timings = V.require("LoadTimings")
+
+-- TEST97 mature-tree persistence. Keep these helpers on MOUND rather than
+-- adding module locals: this donor file sits at LuaJIT's chunk-local ceiling.
+MOUND.MeshDisk = V.require("VoxelMeshDisk")
+MOUND.TREE_RAW_FORMAT = "<" .. string.rep("f", 36)
+MOUND.TREE_VERTEX_BYTES = 6 * 4
+-- TEST101 keeps TEST100's stable eight-cell draw/cache sections, but limits
+-- each graphics-driver write to a small flat triangle-stream slice. The old
+-- fresh path passed a complete section-sized Lua table to one immutable mesh
+-- constructor. TEST102 measures this path; TEST101 did not remove the stall.
+MOUND.TREE_UPLOAD_SLICE = 2048
+MOUND.TREE_RAW_QUADS = 512
+MOUND.TREE_PACK_POLL_QUADS = 64
+
+function MOUND.packTreeStream(vertices, indices)
+  if not indices or #indices == 0 then return { n = 0 } end
+  local chunks, parts, values = {}, {}, {}
+  local quads = 0
+  for at = 1, #indices, 6 do
+    local valueAt = 1
+    for k = 0, 5 do
+      local vertex = vertices[indices[at + k]]
+      if not vertex then return nil end
+      for field = 1, 6 do
+        values[valueAt] = vertex[field]
+        valueAt = valueAt + 1
+      end
+    end
+    parts[#parts + 1] = love.data.pack(
+      "string", MOUND.TREE_RAW_FORMAT, unpack(values, 1, 36))
+    quads = quads + 1
+    if quads % MOUND.TREE_RAW_QUADS == 0 then
+      chunks[#chunks + 1] = table.concat(parts)
+      parts = {}
+    end
+    if quads % MOUND.TREE_PACK_POLL_QUADS == 0 then
+      MOUND.treeBuildYield()
+    end
+  end
+  if #parts > 0 then chunks[#chunks + 1] = table.concat(parts) end
+  return { chunks = chunks, n = #indices }
+end
+
+function MOUND.meshFromTreeStream(record, keepChunks)
+  if not (record and record.n and record.n > 0 and record.chunks) then
+    return nil
+  end
+  local ok, mesh = pcall(function()
+    local result = MOUND.Timings.call("mesh_alloc", love.graphics.newMesh,
+                                         Voxel3D.FORMAT, record.n,
+                                         "triangles", "static")
+    local first, carry = 1, ""
+    local sliceBytes = MOUND.TREE_UPLOAD_SLICE * MOUND.TREE_VERTEX_BYTES
+    for _, chunk in ipairs(record.chunks) do
+      local bytes = carry .. chunk
+      local offset = 1
+      while #bytes - offset + 1 >= sliceBytes do
+        local data = love.data.newByteData(
+          bytes:sub(offset, offset + sliceBytes - 1))
+        MOUND.Timings.call("mesh_write", result.setVertices, result, data, first)
+        first = first + MOUND.TREE_UPLOAD_SLICE
+        data:release()
+        offset = offset + sliceBytes
+        MOUND.treeBuildYield(true)
+      end
+      carry = bytes:sub(offset)
+    end
+    local usable = math.floor(#carry / MOUND.TREE_VERTEX_BYTES)
+                   * MOUND.TREE_VERTEX_BYTES
+    if usable > 0 then
+      local data = love.data.newByteData(carry:sub(1, usable))
+      MOUND.Timings.call("mesh_write", result.setVertices, result, data, first)
+      first = first + usable / MOUND.TREE_VERTEX_BYTES
+      data:release()
+      carry = carry:sub(usable + 1)
+      MOUND.treeBuildYield(true)
+    end
+    if #carry ~= 0 or first ~= record.n + 1 then
+      error("invalid packed tree vertex stream", 0)
+    end
+    return result
+  end)
+  -- Cache hits may release their decompressed bytes after upload. A freshly
+  -- generated section retains the same chunks until its deferred persistent
+  -- record is saved; the graphics path itself never mutates them.
+  if not keepChunks then record.chunks = nil end
+  return ok and mesh or nil
+end
+
+function MOUND.uploadTreeCache(record, publishedParts, focusX, focusZ)
+  local out = publishedParts or {}
+  local ordered = {}
+  for _, rawPart in ipairs((record and record.parts) or {}) do
+    ordered[#ordered + 1] = rawPart
+  end
+  if focusX and focusZ then
+    table.sort(ordered, function(a, b)
+      local adx, adz = (a.x or 0) - focusX, (a.z or 0) - focusZ
+      local bdx, bdz = (b.x or 0) - focusX, (b.z or 0) - focusZ
+      return adx * adx + adz * adz < bdx * bdx + bdz * bdz
+    end)
+  end
+  for _, rawPart in ipairs(ordered) do
+    local part = { x = rawPart.x, y = rawPart.y, z = rawPart.z,
+                   radius = rawPart.radius }
+    local failed = false
+    for _, name in ipairs({ "trunks", "stones", "hoods", "detail", "shadows" }) do
+      local raw = rawPart[name]
+      part[name] = MOUND.meshFromTreeStream(raw)
+      if raw and raw.n and raw.n > 0 and not part[name] then failed = true end
+    end
+    if failed then
+      MOUND.releaseTreeParts(out)
+      for i = #out, 1, -1 do out[i] = nil end
+      MOUND.releaseTreeParts({ part })
+      return nil
+    end
+    if part.trunks or part.stones or part.hoods or part.detail or part.shadows then
+      out[#out + 1] = part
+      -- Cached sections use the same front-buffer handoff as fresh sections.
+      MOUND.treeBuildYield(true)
+    end
+  end
+  return #out > 0 and out or nil
+end
+
+-- Keep TEST100's orchestration outside buildTrunks: that function is already
+-- close to LuaJIT's 200-local ceiling because it owns the complete approved
+-- procedural tree recipe.
+function MOUND.treeSectionOrder(reg, focusX, focusZ)
+  local out = {}
+  for key, lift in pairs(reg or {}) do
+    local cx, cy = key:match("^(-?%d+)|(-?%d+)$")
+    cx, cy = tonumber(cx), tonumber(cy)
+    if cx and cy then
+      local sx, sy = math.floor(cx / 8), math.floor(cy / 8)
+      local centerX, centerZ = sx * 128 + 64, sy * 128 + 64
+      local dx, dz = centerX - (focusX or 0), centerZ - (focusZ or 0)
+      out[#out + 1] = {
+        key = key, lift = lift, cx = cx, cy = cy,
+        spatialKey = sx .. "|" .. sy,
+        distance = dx * dx + dz * dz,
+      }
+    end
+  end
+  table.sort(out, function(a, b)
+    if a.distance ~= b.distance then return a.distance < b.distance end
+    if a.spatialKey ~= b.spatialKey then return a.spatialKey < b.spatialKey end
+    return a.key < b.key
+  end)
+  return out
+end
+
+function MOUND.publishTreePart(p, rawParts, parts)
+  -- Build the same proven unindexed stream used by cache hits even when the
+  -- host cannot persist it. This gives every fresh mature section bounded
+  -- setVertices writes instead of one large immutable constructor call.
+  local canStream = love and love.data and love.data.pack
+                    and love.graphics and love.graphics.newMesh
+  local rawPart
+  if canStream then
+    rawPart = {
+      x = p.x, y = p.y, z = p.z, radius = p.radius,
+      trunks = MOUND.packTreeStream(p.tV, p.tI),
+      stones = MOUND.packTreeStream(p.sV, p.sI),
+      hoods = MOUND.packTreeStream(p.cV, p.cI),
+      detail = MOUND.packTreeStream(p.dV, p.dI),
+      shadows = MOUND.packTreeStream(p.shV, p.shI),
+    }
+    if not (rawPart.trunks and rawPart.stones and rawPart.hoods
+            and rawPart.detail and rawPart.shadows) then
+      rawParts = nil
+      rawPart = nil
+    elseif rawParts then
+      rawParts[#rawParts + 1] = rawPart
+    end
+  end
+  local keepChunks = rawParts ~= nil
+  local function upload(vertices, indices, stream)
+    if #vertices == 0 then return nil end
+    if stream and stream.n and stream.n > 0 then
+      local mesh = MOUND.meshFromTreeStream(stream, keepChunks)
+      if mesh then return mesh end
+      MOUND.Timings.fallback()
+    end
+    -- Retain TEST93's known-working immutable constructor as a safe fallback
+    -- if a host rejects the flat streaming path.
+    MOUND.treeBuildYield(true)
+    local mesh = Voxel3D.newMesh(vertices, indices)
+    MOUND.treeBuildYield(true)
+    return mesh
+  end
+  p.trunks = upload(p.tV, p.tI, rawPart and rawPart.trunks)
+  p.stones = upload(p.sV, p.sI, rawPart and rawPart.stones)
+  p.hoods = upload(p.cV, p.cI, rawPart and rawPart.hoods)
+  p.detail = upload(p.dV, p.dI, rawPart and rawPart.detail)
+  p.shadows = upload(p.shV, p.shI, rawPart and rawPart.shadows)
+  p.tV, p.tI, p.sV, p.sI, p.cV, p.cI = nil, nil, nil, nil, nil, nil
+  p.dV, p.dI, p.shV, p.shI = nil, nil, nil, nil
+  if p.trunks or p.stones or p.hoods or p.detail or p.shadows then
+    parts[#parts + 1] = p
+    MOUND.treeBuildYield(true)
+  end
+  return rawParts
+end
+
+function MOUND.treeCacheSignature(key, registry, history, nbRects, cfg)
+  local cells, rects = {}, {}
+  local bases = rawget(_G, "__ds_round_base") or {}
+  for cell, lift in pairs(registry or {}) do
+    if not (history and history[cell]) then
+      local x, y = tostring(cell):match("^(-?%d+)|(-?%d+)$")
+      local base = x and bases[tostring(key) .. ":" .. (tonumber(x) * 16 + 8)
+                              .. "|" .. (tonumber(y) * 16 + 8)]
+      cells[#cells + 1] = table.concat({ tostring(cell), tostring(lift),
+                                         tostring(base) }, ":")
+    end
+  end
+  for _, rect in ipairs(nbRects or {}) do
+    rects[#rects + 1] = table.concat(rect, ",")
+  end
+  table.sort(cells)
+  table.sort(rects)
+  local text = table.concat({ table.concat(cells, ";"), table.concat(rects, ";"),
+                              cfg and cfg.bouldertrees == true and "b1" or "b0",
+                              cfg and cfg.shadows == false and "s0" or "s1" }, "|")
+  local a, b = 104729, 130363
+  for i = 1, #text do
+    local byte = text:byte(i)
+    a = (a * 131 + byte) % 2147483647
+    b = (b * 257 + byte) % 2147483629
+  end
+  return string.format("%08x%08x", a, b)
+end
 
 -- TEST235B SAFE TREE WIND PROTOTYPE
 -- Keep TEST234 geometry/cache/voxel startup completely intact.  The wind
@@ -658,7 +893,37 @@ MOUND.BACKS = { cache = {}, EPS = 0.35 }
 -- class, sampled at the cell's canonical bottom-left tile. Drawn as two
 -- crossed quads of generated bark, with a short branch on every third
 -- tree.
-MOUND.TRUNK = { cache = {}, nbcache = {}, img = nil, progress = {} }
+MOUND.TRUNK = {
+  cache = {}, nbcache = {},
+  -- TEST90: cuttable saplings no longer share a finished mesh slot with the
+  -- mature tree family. A Cut event can now replace one tiny sapling cache
+  -- without throwing away and rebuilding every route/city crown.
+  sapcache = {}, sapnbcache = {},
+  -- A Cut update can remove the sapling marker one frame before the shared
+  -- round-cell stamp disappears. Remember cells that were authored saplings
+  -- so that short handoff can never reclassify one as a mature tree and queue
+  -- a full-grove rebuild.
+  saplingHistory = {},
+  jobs = {},
+  img = nil, progress = {},
+}
+
+-- TEST90 COOPERATIVE TREE BUILDER:
+-- Community tree meshes are pure Lua until their final GPU upload. Yield the
+-- expensive procedural loops when drawCommunityTrees pumps them with a frame
+-- deadline. Direct/headless callers never set activeBuildCoroutine and retain
+-- the historical synchronous buildTrunks contract.
+function MOUND.treeBuildYield(forcePoll)
+  local T = MOUND.TRUNK
+  if not T.activeBuildCoroutine then return end
+  T.yieldPoll = (T.yieldPoll or 0) + 1
+  if not forcePoll and T.yieldPoll % 2 ~= 0 then return end
+  if coroutine.running() ~= T.activeBuildCoroutine then return end
+  local clock = (love and love.timer and love.timer.getTime) or os.clock
+  if clock() >= (T.frameDeadline or math.huge) then
+    coroutine.yield("tree-budget")
+  end
+end
 
 -- TEST224 FIRST-LOAD COALESCER:
 -- During ChunkMesher startup, the round-cell/base registries arrive in small
@@ -668,7 +933,7 @@ MOUND.TRUNK = { cache = {}, nbcache = {}, img = nil, progress = {} }
 -- still loading. Keep the synchronous, proven builder (no TEST222 async path),
 -- but coalesce registry growth into larger steps and always do a final rebuild
 -- once the registry stops changing. Steady-state visuals are unchanged.
-function MOUND.trunkBuildReady(rk, regN, baseN, builtN, builtBaseN)
+function MOUND.trunkBuildReady(rk, regN, baseN, builtN, builtBaseN, settledOnly)
   local P = MOUND.TRUNK.progress
   local p = P[rk]
   if not p or p.regN ~= regN or p.baseN ~= baseN then
@@ -678,9 +943,6 @@ function MOUND.trunkBuildReady(rk, regN, baseN, builtN, builtBaseN)
     p.stable = (p.stable or 0) + 1
   end
 
-  if builtN == nil or builtBaseN == nil then return true end
-  if regN == builtN and baseN == builtBaseN then return false end
-
   -- TEST225: baseN == regN can happen repeatedly while the registry is still
   -- growing in small batches. TEST224 treated every one of those temporary
   -- equalities as final and rebuilt the full HD crown mesh again. Require a
@@ -688,6 +950,17 @@ function MOUND.trunkBuildReady(rk, regN, baseN, builtN, builtBaseN)
   -- The final visual is identical; we simply stop rebuilding the same trees
   -- several times during first entry into a dense town.
   if regN > 0 and baseN == regN and (p.stable or 0) >= 6 then return true end
+
+  -- TEST90: cooperative mature-tree jobs should not start against the first
+  -- partial registry and then be discarded/restarted as each terrain batch
+  -- arrives. Wait for the same proven settled signals below and build once.
+  -- Saplings and legacy synchronous callers keep the old immediate behavior.
+  if settledOnly then
+    return (p.stable or 0) >= 14
+  end
+
+  if builtN == nil or builtBaseN == nil then return true end
+  if regN == builtN and baseN == builtBaseN then return false end
 
   -- Keep one coarse progressive refresh for genuinely large jumps so a huge
   -- map is not blank for the entire construction phase, but make the threshold
@@ -1303,8 +1576,22 @@ function MOUND.barkImg()
   return T.img or nil
 end
 
-function MOUND.buildTrunks(map, nbRects)
+function MOUND.buildTrunks(map, nbRects, buildGroup, publishedParts,
+                           focusX, focusZ)
   MOUND.TRUNK.tN, MOUND.TRUNK.bN, MOUND.TRUNK.cells = 0, 0, {}
+  -- TEST89 TREE GEOMETRY OPTIMIZATION:
+  -- LEGENDARY FAST is now a visibly lighter geometry recipe instead of an
+  -- almost invisible shell-only reduction. It removes the decorative diamond
+  -- shells, deterministically thins only the main crown population and uses
+  -- two cards on part of the surviving main crown. Structural fork/junction
+  -- dressing and branch-end cover remain complete, as do S/M/L/XL scale,
+  -- textures, wind and shadows. LEGENDARY FULL is the previous recipe exactly.
+  local fullTreeDetail = false
+  do
+    local okCommunity, community = pcall(V.require, "CommunityVisuals")
+    fullTreeDetail = okCommunity and community
+      and community.fullTreeDetail and community.fullTreeDetail() or false
+  end
   local bw = ((map.def or {}).width or 0) * 32
   local bh = ((map.def or {}).height or 0) * 32
   local function buriedUnderNeighbour(mx, mz)
@@ -1332,6 +1619,14 @@ function MOUND.buildTrunks(map, nbRects)
   -- Keeping this as a separate lookup is what prevents the new municipal
   -- sapling from changing any normal small/medium/large/XL tree.
   local saplingReg = (rawget(_G, "__ds_sapling_cells") or {})[rk] or {}
+  local saplingHistory = MOUND.TRUNK.saplingHistory[rk]
+  if not saplingHistory then
+    saplingHistory = {}
+    MOUND.TRUNK.saplingHistory[rk] = saplingHistory
+  end
+  for saplingKey in pairs(saplingReg) do
+    saplingHistory[saplingKey] = true
+  end
   local cfgTrunk = config() or {}
   local tsid = tostring((map.def or {}).tileset or "")
   local boulderSet = MOUND.BOULDER_TILES[tsid] or {}
@@ -1344,6 +1639,7 @@ function MOUND.buildTrunks(map, nbRects)
   -- seam ghost can never make a real singleton think it belongs to a wall.
   local graniteCells = {}
   for cellKey, cellLift in pairs(reg) do
+    MOUND.treeBuildYield()
     local gx, gy = cellKey:match("^(-?%d+)|(-?%d+)$")
     gx, gy = tonumber(gx), tonumber(gy)
     if gx and gy and cellLift and cellLift > 0 then
@@ -1398,10 +1694,20 @@ function MOUND.buildTrunks(map, nbRects)
     Voxel3D.pushQuad(shI, shQ)
     shQ = shQ + 1
   end
+  -- TEST100 TRUE SECTION PIPELINE: TEST99 published sections early only after
+  -- CPU geometry for the whole map was already finished. That left a blank
+  -- handoff before the first section existed. Keep the accepted eight-cell
+  -- meshes, but order their owners by section and finish the nearest section's
+  -- geometry, packing, GPU upload and publication before starting the next.
+  local parts = publishedParts or {}
+  local rawParts = buildGroup == "mature" and MOUND.MeshDisk.available()
+                   and love and love.data and love.data.pack and {} or nil
+  local spatialOrder = MOUND.treeSectionOrder(reg, focusX, focusZ)
   local count = 0
-  for key, lift in pairs(reg) do
-    local cx, cy = key:match("^(-?%d+)|(-?%d+)$")
-    cx, cy = tonumber(cx), tonumber(cy)
+  for treeOrdinal, treeEntry in ipairs(spatialOrder) do
+    MOUND.treeBuildYield()
+    local key, lift = treeEntry.key, treeEntry.lift
+    local cx, cy = treeEntry.cx, treeEntry.cy
     if cx and cy and lift and lift > 0 then
       local okT, tile = pcall(function()
         if map.cellTile then return map:cellTile(cx, cy) end
@@ -1445,12 +1751,23 @@ function MOUND.buildTrunks(map, nbRects)
       local base = roundBase
                    [rk .. ":" .. (cx * 16 + 8) .. "|" .. (cy * 16 + 8)]
       if base == nil then goto continue end
-      local spatialKey = math.floor(cx / 8) .. "|" .. math.floor(cy / 8)
+      local sapling = saplingReg[key] == true
+      local wasSapling = sapling or saplingHistory[key] == true
+      if buildGroup == "mature" and wasSapling then goto continue end
+      if buildGroup == "sapling" and not sapling then goto continue end
+      -- Keep TEST377's accepted eight-cell steady-state batching. Mature tree
+      -- geometry is published with the proven whole-material uploader below;
+      -- terrain uploads are budgeted independently by ChunkMesher.
+      local sectionCells = 8
+      local sectionWorld = sectionCells * 16
+      local spatialKey = treeEntry.spatialKey
       local spatialPart = spatial[spatialKey]
       if not spatialPart then
-        local bx, bz = math.floor(cx / 8) * 128, math.floor(cy / 8) * 128
+        local bx = math.floor(cx / sectionCells) * sectionWorld
+        local bz = math.floor(cy / sectionCells) * sectionWorld
         spatialPart = {
-          x = bx + 64, y = 22, z = bz + 64, radius = 125,
+          x = bx + sectionWorld * 0.5, y = 22,
+          z = bz + sectionWorld * 0.5, radius = 125,
           tV = {}, tI = {}, tQ = 0, sV = {}, sI = {}, sQ = 0,
           cV = {}, cI = {}, cQ = 0, dV = {}, dI = {}, dQ = 0,
           shV = {}, shI = {}, shQ = 0,
@@ -1478,7 +1795,6 @@ function MOUND.buildTrunks(map, nbRects)
         wallConnected, wallHorizontal, wallVertical, wallPier, wallDirs =
           MOUND.graniteWallRole(cx, cy, graniteCells, granitePiers)
       end
-      local sapling = saplingReg[key] == true
       if boulder then
         MOUND.TRUNK.bN = (MOUND.TRUNK.bN or 0) + 1
       else
@@ -2050,14 +2366,28 @@ function MOUND.buildTrunks(map, nbRects)
         -- Compact volumetric broadleaf bunch. Three planes at different yaw and
         -- pitch angles make the bunch hold up from front, side and oblique views.
         -- Squat proportions are deliberate: no grass blades / palm fronds.
-        local function leafBunch(lx,ly,lz,rx,ry,shade,yaw,tilt,tone,upperOutlierSeat,suppressUpperShell)
+        local bunchSerial = 0
+        local function leafBunch(lx,ly,lz,rx,ry,shade,yaw,tilt,tone,upperOutlierSeat,suppressUpperShell,fastMainCrown)
+          -- Branch-tip and junction bunches do not pass through the main-lobe
+          -- loop's budget check. Poll here too so no single tree can monopolize
+          -- the frame while its foliage tables are being assembled.
+          MOUND.treeBuildYield()
+          bunchSerial = bunchSerial + 1
+          -- TEST89: thin only the repeated lobe-field population. Calls that
+          -- cover branch tips, the trunk junction and the lower wrap do not set
+          -- fastMainCrown, so FAST cannot expose bare branch ends or disconnect
+          -- the trunk from the canopy. The hash keeps each tree stable in motion.
+          if not fullTreeDetail and fastMainCrown
+             and hash01(cx, cy, 24800 + bunchSerial * 29) < 0.35 then
+            return
+          end
           -- TEST247 HD-FOLIAGE EXPERIMENT: borrow the HD grass principle rather
           -- than merely its colour.  Each bunch gets a compact low-poly leaf
           -- shell (six tapered diamond blades in 3-D) behind the proven TEST246
           -- textured cards.  This adds true silhouette/parallax while preserving
           -- 246's crown population, architecture and material language.
           local shellBase=#dV
-          local shellCount=6
+          local shellCount = fullTreeDetail and 6 or 0
           -- TEST295 UPPER DIAMOND-SHELL CULL:
           -- Playtest proved the stubborn crown-tip horns are the TEST247 diamond
           -- add-ons, not the parent bunch centers or the approved crossed-card
@@ -2099,7 +2429,12 @@ function MOUND.buildTrunks(map, nbRects)
           -- TEST243: the same three crossed planes, but with deliberately unequal
           -- widths/heights so every bunch reads as an organic clump rather than
           -- three copies of the same upright card.  Geometry count is unchanged.
-          for k=0,2 do
+          local cardCount = 3
+          if not fullTreeDetail and fastMainCrown
+             and hash01(cx, cy, 24900 + bunchSerial * 31) < 0.45 then
+            cardCount = 2
+          end
+          for k=0,cardCount-1 do
             local a=yaw + k*math.pi/3 + (k-1)*tilt*0.12
             local ca,sa=math.cos(a),math.sin(a)
             local hw=rx*((k==0 and 1.18) or (k==1 and 0.96) or 1.08)
@@ -2649,6 +2984,19 @@ function MOUND.buildTrunks(map, nbRects)
           local cy0=base+lift+L[3]-xlShoulderDrop
           for j=1,L[7] do
             serial=serial+1
+            -- TEST90: TEST89 decided this only after calculating the complete
+            -- procedural position/shape for the bunch. Make the identical
+            -- deterministic decision up front so rejected FAST clumps allocate
+            -- and calculate nothing. Manually advance bunchSerial on a skip so
+            -- every surviving TEST89 clump keeps the same identity and look.
+            local nextBunchSerial = bunchSerial + 1
+            if not fullTreeDetail
+               and hash01(cx, cy, 24800 + nextBunchSerial * 29) < 0.35 then
+              bunchSerial = nextBunchSerial
+              goto continueMainCrown
+            end
+            do
+            MOUND.treeBuildYield()
             local h1=hash01(cx,cy,7000+serial*5)
             local h2=hash01(cx,cy,7001+serial*5)
             local h3=hash01(cx,cy,7002+serial*5)
@@ -3067,7 +3415,9 @@ function MOUND.buildTrunks(map, nbRects)
             local suppressUpperShell = postCrownOutlier or finalEnvelopeSeat
                                        or finalUndersideSeat or undersideShellCull
             leafBunch(lx,ly,lz,rx,ry,light,yaw,tilt,tone,
-                      postCrownOutlier,suppressUpperShell)
+                      postCrownOutlier,suppressUpperShell,true)
+            end
+            ::continueMainCrown::
           end
         end
 
@@ -3108,22 +3458,17 @@ function MOUND.buildTrunks(map, nbRects)
       count = count + 1
       ::continue::
     end
-  end
-  local parts = {}
-  for _, p in pairs(spatial) do
-    p.trunks = p.tQ > 0 and Voxel3D.newMesh(p.tV, p.tI) or nil
-    p.stones = p.sQ > 0 and Voxel3D.newMesh(p.sV, p.sI) or nil
-    p.hoods = p.cQ > 0 and Voxel3D.newMesh(p.cV, p.cI) or nil
-    p.detail = p.dQ > 0 and Voxel3D.newMesh(p.dV, p.dI) or nil
-    p.shadows = p.shQ > 0 and Voxel3D.newMesh(p.shV, p.shI) or nil
-    p.tV, p.tI, p.sV, p.sI, p.cV, p.cI = nil, nil, nil, nil, nil, nil
-    p.dV, p.dI, p.shV, p.shI = nil, nil, nil, nil
-    if p.trunks or p.stones or p.hoods or p.detail or p.shadows then
-      parts[#parts + 1] = p
+    local nextTree = spatialOrder[treeOrdinal + 1]
+    if not nextTree or nextTree.spatialKey ~= treeEntry.spatialKey then
+      local completedPart = spatial[treeEntry.spatialKey]
+      if completedPart then
+        rawParts = MOUND.publishTreePart(completedPart, rawParts, parts)
+        spatial[treeEntry.spatialKey] = nil
+      end
     end
   end
   if #parts == 0 then return nil end
-  return nil, nil, count, nil, nil, nil, parts
+  return nil, nil, count, nil, nil, nil, parts, rawParts
 end
 
 -- TEST377 section visibility and submission. A generous projected margin plus
@@ -5660,7 +6005,7 @@ local function drawParticles(state, map, cfg, px, pz, yaw, t, dt, outdoor,
       -- drips in caves
       local tid = map.def and map.def.tileset
                   or (map.tileset and map.tileset.id)
-      if not leafOnly and tid == "CAVERN" and tex.drip
+      if not leafOnly and tid == "CAVERN" and cfg.drips ~= false and tex.drip
          and math.random() < DRIP_RATE * dt then
         spawn("drip", px + (math.random() - 0.5) * 150, 30,
               pz + (math.random() - 0.5) * 150, 0, -46, 0, 1.6, 2.2)
@@ -6079,29 +6424,41 @@ MOUND.AMB = { srcs = {}, beat = -1e9,
 function MOUND.AMB.src(k)
   local got = MOUND.AMB.srcs[k]
   if got ~= nil then return got or nil end
-  -- every plausible home for the file, tried in order; the error from
-  -- the last attempt is kept and surfaced on the debug line, because a
-  -- silent pcall was how 1.51.0 shipped a feature nobody could hear
-  local dirs = {}
-  local pd = rawget(_G, "__ds_posters_dir")
-  if pd then dirs[#dirs + 1] = pd end
-  local bp = rawget(_G, "__ds_backdrop_path")
-  if type(bp) == "string" then
-    local d = bp:match("^(.*/)[^/]+$")
-    if d then dirs[#dirs + 1] = d end
+  -- Read through the active mod first. Files inside a mounted zip do not
+  -- necessarily exist at a physical mods/BATTLE_ART_VOXEL_FORK path, which
+  -- made cave ambience and footsteps silently disappear on packaged installs.
+  local src, err = nil, "mod asset unavailable"
+  local kinds = MOUND.AMB.LOOPS[k] and { "stream", "static" }
+                                      or { "static", "stream" }
+  local function prepare(input, kind)
+    local made = love.audio.newSource(input, kind)
+    made:setLooping(MOUND.AMB.LOOPS[k] and true or false)
+    made:setVolume(MOUND.AMB.LOOPS[k] and 0 or MOUND.AMB.STEP_VOL)
+    return made
   end
-  dirs[#dirs + 1] = "mods/DRAMATIC_SHAPE/lib/"
-  dirs[#dirs + 1] = "mods/BATTLE_ART_VOXEL_FORK/lib/"
-  dirs[#dirs + 1] = "mods/DRAMALESS_SHAPE/lib/"
-  dirs[#dirs + 1] = "mods/TERRARIUM/lib/"
-  local src, err = nil, "no directories to try"
-  for _, dir in ipairs(dirs) do
-    for _, kind in ipairs({ "stream", "static" }) do
+  local okBytes, bytes = pcall(function()
+    return V.mod:read("lib/" .. MOUND.AMB.FILES[k])
+  end)
+  if okBytes and type(bytes) == "string" and #bytes > 0 then
+    for _, kind in ipairs(kinds) do
       local ok, got2 = pcall(function()
-        local sc = love.audio.newSource(dir .. MOUND.AMB.FILES[k], kind)
-        sc:setLooping(MOUND.AMB.LOOPS[k] and true or false)
-        sc:setVolume(MOUND.AMB.LOOPS[k] and 0 or MOUND.AMB.STEP_VOL)
-        return sc
+        local data = love.filesystem.newFileData(
+          bytes, MOUND.AMB.FILES[k])
+        return prepare(data, kind)
+      end)
+      if ok and got2 then src = got2 break end
+      err = tostring(got2)
+    end
+  end
+
+  -- Physical folders remain compatibility fallbacks for older engines and
+  -- unpacked developer installs. The last failure is retained for diagnostics.
+  local dirs = { (V.path or "mods/BATTLE_ART_VOXEL_FORK") .. "/lib/" }
+  for _, dir in ipairs(dirs) do
+    if src then break end
+    for _, kind in ipairs(kinds) do
+      local ok, got2 = pcall(function()
+        return prepare(dir .. MOUND.AMB.FILES[k], kind)
       end)
       if ok and got2 then src = got2 break end
       err = tostring(got2)
@@ -6239,13 +6596,25 @@ function MOUND.AMB.tick(map, outdoor, cfg, dt, px, pz, shoreF)
       pcall(function()
         sc:stop()
         sc:setVolume(vol or MOUND.AMB.STEP_VOL)
+        if k == "cstep" and sc.setPitch then
+          MOUND.AMB.rockFlip = not MOUND.AMB.rockFlip
+          sc:setPitch(MOUND.AMB.rockFlip and 0.96 or 1.04)
+        elseif sc.setPitch then
+          sc:setPitch(1)
+        end
         sc:play()
       end)
     end
   end
+  local rkNow = (map and map.id) or (map and map.def and map.def.id)
+                or tostring(map)
   if px then
-    local cx, cy = math.floor(px / 16), math.floor(pz / 16)
-    local ck = cx .. "|" .. cy
+    -- Gen 1 movement advances on 8-pixel tiles. The old 16-pixel cell key
+    -- fired only every second visible step, and on short cave runs could sound
+    -- completely absent. Include the map key so a warp cannot inherit a stale
+    -- position from the previous room.
+    local cx, cy = math.floor(px / 8), math.floor(pz / 8)
+    local ck = tostring(rkNow) .. "|" .. cx .. "|" .. cy
     if ck ~= MOUND.AMB.lastCell then
       MOUND.AMB.lastCell = ck
       local okG, g = pcall(function() return map:isGrassCell(cx, cy) end)
@@ -6260,7 +6629,7 @@ function MOUND.AMB.tick(map, outdoor, cfg, dt, px, pz, shoreF)
         -- silent -- dirt paths have no take, and silence beats a
         -- wrong sound on every step of a journey
         if tidNow == "CAVERN" or tidNow == "UNDERGROUND" then
-          oneShot("cstep", 0.55)
+          oneShot("cstep", 0.82)
         elseif not outdoor and tidNow ~= "FOREST" then
           oneShot("wstep", 0.5)
         end
@@ -6273,8 +6642,6 @@ function MOUND.AMB.tick(map, outdoor, cfg, dt, px, pz, shoreF)
   -- have no door to sound; every other interior gets the house door.
   -- The interior side of the crossing names the sound, whichever way
   -- the player is going.
-  local rkNow = (map and map.id) or (map and map.def and map.def.id)
-                or tostring(map)
   if MOUND.AMB.prevRk ~= nil and rkNow ~= MOUND.AMB.prevRk
      and cfg.doorsfx ~= false
      and MOUND.AMB.prevOut ~= nil and outdoor ~= MOUND.AMB.prevOut then
@@ -6915,28 +7282,82 @@ end
 -- for every visual system except the exact tree cells opted into below.
 function Flora.drawCommunityTrees(state)
   local visuals = V.require("CommunityVisuals")
-  if not (visuals.customTrees() or visuals.customCutTrees()) then return end
   local map = state and state.map
   if not (map and isOutdoor(map)) then return end
+  local forestTrees = visuals.customForest() and isCanopy(map)
+  if not (visuals.customTrees() or visuals.customCutTrees() or forestTrees) then
+    return
+  end
   local player = state.player
   local px = (player and player.px or 0) + 8
   local pz = (player and player.py or 0) + 8
   local treeSway = MOUND.canopySway(now(), {})
+  -- Keep the selected geometry recipe in every slot. This is independent of
+  -- the ordinary OPTIONS invalidation, so even hosts that sync the setting by
+  -- another route cannot reuse a FULL mesh after switching to FAST (or vice
+  -- versa).
+  local treeDetail = visuals.fullTreeDetail() and "full" or "fast"
+  local treeCfg = config()
+  -- One shared cooperative slice for every current/neighbor tree job this
+  -- frame. Four milliseconds stays well below a 30 FPS frame's 33 ms budget;
+  -- the previous completed slot remains visible until its replacement lands.
+  local treeClock = (love and love.timer and love.timer.getTime) or os.clock
+  MOUND.TRUNK.frameDeadline = treeClock() + 0.004
+  MOUND.TRUNK.yieldPoll = 0
 
-  local function counts(target)
+  local countMemo = {}
+  local function counts(target, buildGroup)
     local key = target.id or (target.def and target.def.id) or target
+    local memo = countMemo[key]
+    if memo then
+      if buildGroup == "sapling" then
+        return key, memo.registry, memo.sapN, memo.sapBaseN
+      elseif buildGroup == "mature" then
+        return key, memo.registry, memo.matureN, memo.matureBaseN
+      end
+      return key, memo.registry, memo.sapN + memo.matureN,
+             memo.sapBaseN + memo.matureBaseN
+    end
     local registry = (rawget(_G, "__ds_round_cells") or {})[key] or {}
+    local saplings = (rawget(_G, "__ds_sapling_cells") or {})[key] or {}
+    local history = MOUND.TRUNK.saplingHistory[key]
+    if not history then
+      history = {}
+      MOUND.TRUNK.saplingHistory[key] = history
+    end
+    for cell in pairs(saplings) do history[cell] = true end
     local bases = rawget(_G, "__ds_round_base") or {}
-    local n, baseN = 0, 0
+    local matureN, matureBaseN, sapN, sapBaseN = 0, 0, 0, 0
     for cell in pairs(registry) do
-      n = n + 1
+      local isSapling = saplings[cell] == true
+      local wasSapling = isSapling or history[cell] == true
+      if isSapling then
+        sapN = sapN + 1
+      elseif not wasSapling then
+        matureN = matureN + 1
+      end
       local x, y = cell:match("^(-?%d+)|(-?%d+)$")
       if x and bases[key .. ":" .. (tonumber(x) * 16 + 8) .. "|"
           .. (tonumber(y) * 16 + 8)] ~= nil then
-        baseN = baseN + 1
+        if isSapling then
+          sapBaseN = sapBaseN + 1
+        elseif not wasSapling then
+          matureBaseN = matureBaseN + 1
+        end
       end
     end
-    return key, registry, n, baseN
+    memo = {
+      registry = registry,
+      matureN = matureN, matureBaseN = matureBaseN,
+      sapN = sapN, sapBaseN = sapBaseN,
+    }
+    countMemo[key] = memo
+    if buildGroup == "sapling" then
+      return key, registry, sapN, sapBaseN
+    elseif buildGroup == "mature" then
+      return key, registry, matureN, matureBaseN
+    end
+    return key, registry, sapN + matureN, sapBaseN + matureBaseN
   end
 
   local function release(slot)
@@ -6948,34 +7369,155 @@ function Flora.drawCommunityTrees(state)
     end
   end
 
-  local function ensure(target, cache, nbRects, prefix)
-    local key, registry, n, baseN = counts(target)
+  local function abandon(job)
+    if not job then return end
+    MOUND.Timings.cancel(job.co)
+    if job.progressParts then
+      MOUND.releaseTreeParts(job.progressParts)
+      job.progressParts = nil
+    end
+    job.previewSlot = nil
+  end
+
+  local function ensure(target, cache, nbRects, prefix, buildGroup, priority,
+                        focusX, focusZ)
+    local key, registry, n, baseN = counts(target, buildGroup)
     local slot = cache[key]
-    if n == 0 then return key, slot end
+    local jobId = (prefix or "community:") .. tostring(key)
+                   .. ":" .. tostring(buildGroup or "all")
+    if n == 0 then
+      -- Mature registries may briefly be empty while the terrain mesher fills
+      -- them, so retain their last good slot. A removed Cut sapling is real
+      -- gameplay state and its tiny isolated slot must disappear immediately.
+      if buildGroup == "sapling" and slot then
+        release(slot)
+        cache[key], slot = nil, nil
+      end
+      abandon(MOUND.TRUNK.jobs[jobId])
+      MOUND.TRUNK.jobs[jobId] = nil
+      if MOUND.TRUNK.activeJobId == jobId then
+        MOUND.TRUNK.activeJobId, MOUND.TRUNK.activeJobPriority = nil, nil
+      end
+      return key, slot
+    end
+    local recipe = buildGroup == "sapling" and "sapling" or treeDetail
+    local hardChanged = slot and (slot.treeDetail ~= recipe
+      or slot.bt ~= (treeCfg.bouldertrees == true)
+      or slot.sh ~= (treeCfg.shadows ~= false))
     local changed = not slot or slot.regRef ~= registry
       or slot.n ~= n or slot.baseN ~= baseN
+      or hardChanged
     -- Connected-map ring owners can be registered but deliberately discarded
     -- by Battle Art's body/mask rules, so baseN may correctly stay below n.
     -- Use TEST435's proven coalescer and let buildTrunks ignore owners without
     -- a published base; requiring baseN == n made the whole tree family wait
     -- forever and appear completely missing.
-    local ready = changed and baseN > 0 and MOUND.trunkBuildReady(
-      (prefix or "community:") .. tostring(key), n, baseN,
-      slot and slot.n, slot and slot.baseN)
-    if ready then
-      release(slot)
-      local trunks, stones, count, hoods, shadows, detail, parts =
-        MOUND.buildTrunks(target, nbRects)
-      slot = {
-        trunks = trunks, stones = stones, hoods = hoods,
-        shadows = shadows, detail = detail, parts = parts,
-        count = count or 0, n = n, baseN = baseN, regRef = registry,
-        baseComplete = (n > 0 and baseN == n),
-        tN = MOUND.TRUNK.tN, bN = MOUND.TRUNK.bN,
-        cells = MOUND.TRUNK.cells,
-      }
-      cache[key] = slot
+    local ready = changed and baseN > 0 and
+      (hardChanged or MOUND.trunkBuildReady(
+        jobId, n, baseN,
+        slot and slot.n, slot and slot.baseN, buildGroup == "mature"))
+    local history = MOUND.TRUNK.saplingHistory[key] or {}
+    local cacheSignature = buildGroup == "mature"
+      and MOUND.treeCacheSignature(key, registry, history, nbRects, treeCfg)
+      or nil
+    local signature = table.concat({ recipe, cacheSignature or tostring(registry),
+                                     tostring(n), tostring(baseN) }, "|")
+    local job = MOUND.TRUNK.jobs[jobId]
+    if job and job.signature ~= signature then
+      abandon(job)
+      MOUND.TRUNK.jobs[jobId], job = nil, nil
+      if MOUND.TRUNK.activeJobId == jobId then
+        MOUND.TRUNK.activeJobId, MOUND.TRUNK.activeJobPriority = nil, nil
+      end
     end
+    if ready and not job then
+      job = {
+        signature = signature,
+        priority = priority or 0,
+      }
+      job.progressParts = {}
+      job.previewSlot = { parts = job.progressParts }
+      job.co = coroutine.create(function()
+          if buildGroup == "mature" and cacheSignature then
+            local cached = MOUND.MeshDisk.loadTreeParts(
+              target, recipe, cacheSignature,
+              function() MOUND.treeBuildYield(true) end)
+            if cached then
+              local cachedParts = MOUND.uploadTreeCache(
+                cached, job.progressParts, focusX, focusZ)
+              if cachedParts then
+                MOUND.TRUNK.tN = cached.tN or 0
+                MOUND.TRUNK.bN = cached.bN or 0
+                MOUND.TRUNK.cells = cached.cells or {}
+                return nil, nil, cached.count or n, nil, nil, nil,
+                       cachedParts, nil
+              end
+            end
+          end
+          local trunks, stones, count, hoods, shadows, detail, parts, rawParts =
+            MOUND.buildTrunks(target, nbRects, buildGroup,
+                              job.progressParts, focusX, focusZ)
+          if buildGroup == "mature" and cacheSignature and rawParts then
+            MOUND.MeshDisk.saveTreeParts(target, recipe, cacheSignature, {
+              parts = rawParts, count = count or 0,
+              tN = MOUND.TRUNK.tN, bN = MOUND.TRUNK.bN,
+              cells = MOUND.TRUNK.cells,
+            }, function() MOUND.treeBuildYield(true) end)
+          end
+          return trunks, stones, count, hoods, shadows, detail, parts, rawParts
+        end)
+      MOUND.TRUNK.jobs[jobId] = job
+    end
+    if job then
+      local activeId = MOUND.TRUNK.activeJobId
+      local activePriority = MOUND.TRUNK.activeJobPriority or -1
+      if not activeId or (job.priority or 0) > activePriority then
+        if activeId and activeId ~= jobId then
+          abandon(MOUND.TRUNK.jobs[activeId])
+          MOUND.TRUNK.jobs[activeId] = nil
+        end
+        MOUND.TRUNK.activeJobId = jobId
+        MOUND.TRUNK.activeJobPriority = job.priority or 0
+      end
+      if MOUND.TRUNK.activeJobId == jobId
+         and treeClock() < MOUND.TRUNK.frameDeadline then
+        MOUND.TRUNK.activeBuildCoroutine = job.co
+        local ok, trunks, stones, count, hoods, shadows, detail, parts =
+          MOUND.Timings.resume(job.co)
+        MOUND.TRUNK.activeBuildCoroutine = nil
+        if not ok then
+          MOUND.Timings.jobError()
+          abandon(job)
+          MOUND.TRUNK.jobs[jobId] = nil
+          MOUND.TRUNK.activeJobId, MOUND.TRUNK.activeJobPriority = nil, nil
+        elseif coroutine.status(job.co) == "dead" then
+          release(slot)
+          slot = {
+            trunks = trunks, stones = stones, hoods = hoods,
+            shadows = shadows, detail = detail, parts = parts,
+            count = count or 0, n = n, baseN = baseN, regRef = registry,
+            treeDetail = recipe,
+            bt = (treeCfg.bouldertrees == true),
+            sh = (treeCfg.shadows ~= false),
+            baseComplete = (n > 0 and baseN == n),
+            tN = MOUND.TRUNK.tN, bN = MOUND.TRUNK.bN,
+            cells = MOUND.TRUNK.cells,
+          }
+          cache[key] = slot
+          -- The completed cache slot now owns fresh progressive parts. Cache
+          -- hits return a separate parts table, so discard only the unused
+          -- empty preview in that case.
+          if job.progressParts and job.progressParts ~= parts then
+            MOUND.releaseTreeParts(job.progressParts)
+          end
+          job.progressParts, job.previewSlot = nil, nil
+          MOUND.TRUNK.jobs[jobId] = nil
+          MOUND.TRUNK.activeJobId, MOUND.TRUNK.activeJobPriority = nil, nil
+        end
+      end
+    end
+    local preview = job and job.previewSlot
+    if not slot and preview and #(preview.parts or {}) > 0 then slot = preview end
     return key, slot
   end
 
@@ -7010,16 +7552,152 @@ function Flora.drawCommunityTrees(state)
       }
     end
   end
-  local _, current = ensure(map, MOUND.TRUNK.cache, nbRects, "community:cur:")
+  -- Saplings are tiny and gameplay-reactive, so service them first. Mature
+  -- trees keep their last completed slot while a replacement job is sliced.
+  local _, currentSapling = ensure(map, MOUND.TRUNK.sapcache, nbRects,
+                                   "community:cur:", "sapling", 4, px, pz)
+  drawSlot(currentSapling, 0, 0, true)
+  local _, current = ensure(map, MOUND.TRUNK.cache, nbRects,
+                            "community:cur:", "mature", 3, px, pz)
   drawSlot(current, 0, 0, true)
 
   for _, nb in ipairs(state.neighbors or {}) do
     if nb.map then
+      local _, saplingSlot = ensure(nb.map, MOUND.TRUNK.sapnbcache, nil,
+                                    "community:nb:", "sapling", 2,
+                                    px - (nb.ox or 0), pz - (nb.oy or 0))
+      drawSlot(saplingSlot, nb.ox or 0, nb.oy or 0, false)
       local _, slot = ensure(nb.map, MOUND.TRUNK.nbcache, nil,
-                             "community:nb:")
+                             "community:nb:", "mature", 1,
+                             px - (nb.ox or 0), pz - (nb.oy or 0))
       drawSlot(slot, nb.ox or 0, nb.oy or 0, false)
     end
   end
+end
+
+-- TEST55: the approved TEST115/116 Viridian presentation, kept behind its
+-- own community row.  This companion pass adds only the stitched canopy roof
+-- and the TEST190 crossed-card falling leaves.  The separate TREES row owns
+-- the mature swaying tree family; weather, grass,
+-- cave particles, ambience and every unrelated Flora system remain outside
+-- Battle Art's frame.
+function Flora.drawCommunityForest(state, atlasFor)
+  local visuals = V.require("CommunityVisuals")
+  if not visuals.customForest() then return end
+  local map = state and state.map
+  if not (map and isCanopy(map)) then return end
+
+  local p = state.player
+  local px = (p and p.px or 0) + 8
+  local pz = (p and p.py or 0) + 8
+  local t = now()
+  local dt = lastT and math.max(0, math.min(0.1, t - lastT)) or 0
+  lastT = t
+  movedThisFrame = wasX and (math.abs(px - wasX) + math.abs(pz - wasZ)) or 0
+  wasX, wasZ = px, pz
+
+  local okB, blend = pcall(FirstPerson.blendEased)
+  blend = (okB and blend) or 0
+  local mode = (blend > CANOPY_GATE) and "fp" or "cutaway"
+  local pcx, pcy
+  if mode == "cutaway" then
+    pcx, pcy = math.floor(px / 16), math.floor(pz / 16)
+  end
+  local ckey = table.concat({ mode, pcx or "-", pcy or "-" }, ":")
+  if not canopyCache or canopyCache.map ~= map or canopyCache.key ~= ckey then
+    if canopyCache and canopyCache.mesh then
+      pcall(canopyCache.mesh.release, canopyCache.mesh)
+    end
+    local tx = nil
+    if atlasFor then
+      local okA, a = pcall(atlasFor, map)
+      if okA then tx = a end
+    end
+    local mesh, vines, note = buildCanopy(map, tx, mode, pcx, pcy)
+    canopyCache = {
+      map = map, key = ckey, mesh = mesh, vines = vines, note = note,
+    }
+  end
+
+  if canopyCache and canopyCache.mesh then
+    local tx = nil
+    if atlasFor then
+      local okA, a = pcall(atlasFor, map)
+      if okA then tx = a end
+    end
+    guarded(function() Voxel3D.draw(canopyCache.mesh, tx, nil) end)
+  end
+
+  local yaw = (FirstPerson and FirstPerson.yaw) or 0
+  local key = map.id or (map.def and map.def.id) or map
+  local cells = (MOUND.TRUNK.cache[key] or {}).cells
+  drawParticles(state, map, { particles = true }, px, pz, yaw, t, dt,
+                true, cells, true)
+end
+
+-- TEST67: a deliberately narrow bridge to the donor cave atmosphere.
+--
+-- Do not call Flora.draw here: that entry point owns the donor's entire
+-- outdoor/indoor presentation. In particular, the matching ceiling payload
+-- synthesizes wall risers up to its roof. Battle Art's approved TEST66 rock
+-- walls and dirt path stay authoritative; this pass may only add independent
+-- dressing over the finished terrain.
+function Flora.drawCommunityCaveAtmosphere(state)
+  local visuals = V.require("CommunityVisuals")
+  local map = state and state.map
+  if not map then return end
+
+  local detail = visuals.caveDetailLevel()
+  local sound = visuals.caveSoundLevel()
+  local t = now()
+  local dt = MOUND.caveAtmosphereT
+             and math.max(0, math.min(0.1, t - MOUND.caveAtmosphereT)) or 0
+  MOUND.caveAtmosphereT = t
+
+  local tid = tostring((map.def and map.def.tileset)
+              or (map.tileset and map.tileset.id) or "")
+  local cave = tid == "CAVERN"
+  local p = state.player
+  local px = (p and p.px or 0) + 8
+  local pz = (p and p.py or 0) + 8
+  local ambience = "OFF"
+  if cave and sound == "low" then ambience = "LOW"
+  elseif cave and sound == "mid" then ambience = "MID" end
+
+  -- Keep ticking the mixer outside caves (at OFF) so a cave bed fades cleanly
+  -- during a map transition. No source is loaded while both rows are OFF.
+  local audioCfg = {
+    ambience = ambience,
+    stepsfx = cave and sound ~= "off",
+    grasssfx = false,
+    doorsfx = false,
+  }
+  pcall(MOUND.AMB.tick, map, false, audioCfg, dt, px, pz, 0)
+
+  if not cave or detail == "off" then return end
+
+  tex = tex or makeTex()
+  partMesh = partMesh or makeQuad()
+  local yaw = (FirstPerson and FirstPerson.yaw) or 0
+  local detailCfg = {
+    -- SUBTLE never touches the walking surface. FULL adds only the donor's
+    -- sparse shallow pools; neither mode modifies the dirt material itself.
+    -- TEST73's dimensional atmosphere owns pools and drips. Keeping the donor
+    -- versions off prevents flat water dots/cards from mixing with the new
+    -- low-poly drops, splash rings and wall-edge pool meshes.
+    pools = false,
+    drips = false,
+    -- TEST68's CaveSconces pass owns true 3D wall-mounted torches. Keep the
+    -- donor's centre-cell billboard implementation permanently disabled.
+    sconces = false,
+    bats = false, -- donor bat frames are generated assets, not bundled here
+    -- TEST74 removes the donor's bright camera-facing cave motes. In motion
+    -- they read as white floating balls and compete with the grounded 3D
+    -- droplets; the cached haze mesh now supplies the atmospheric depth.
+    particles = false,
+  }
+  drawParticles(state, map, detailCfg, px, pz, yaw, t, dt, false, nil, false)
+  drawCave(map, detailCfg, px, pz, yaw, t, dt, true, partMesh)
 end
 
 function Flora.invalidate()
@@ -7072,6 +7750,23 @@ function Flora.invalidate()
     if slot.detail then pcall(slot.detail.release, slot.detail) end
   end
   MOUND.TRUNK.nbcache = {}
+  for _, cache in ipairs({ MOUND.TRUNK.sapcache, MOUND.TRUNK.sapnbcache }) do
+    for _, slot in pairs(cache or {}) do
+      MOUND.releaseTreeParts(slot.parts)
+      for _, name in ipairs({ "trunks", "stones", "hoods", "detail", "shadows" }) do
+        local mesh = slot[name]
+        if mesh then pcall(mesh.release, mesh) end
+      end
+    end
+  end
+  MOUND.TRUNK.sapcache, MOUND.TRUNK.sapnbcache = {}, {}
+  MOUND.TRUNK.saplingHistory = {}
+  for _, job in pairs(MOUND.TRUNK.jobs or {}) do
+    if job.progressParts then MOUND.releaseTreeParts(job.progressParts) end
+  end
+  MOUND.TRUNK.jobs, MOUND.TRUNK.progress = {}, {}
+  MOUND.TRUNK.activeBuildCoroutine = nil
+  MOUND.TRUNK.activeJobId, MOUND.TRUNK.activeJobPriority = nil, nil
   for _, slot in pairs(MOUND.PEAK.cache) do
     if slot.mesh then pcall(slot.mesh.release, slot.mesh) end
   end
@@ -7091,6 +7786,7 @@ function Flora.invalidate()
   end
   MOUND.AMB.srcs = {}
   MOUND.particleMapKey = nil
+  MOUND.caveAtmosphereT = nil
 end
 
 -- TEST384: choose exactly ONE spatial tree section for the real sun pass.
@@ -7121,11 +7817,15 @@ function Flora.nearestShadowPart(state, wx, wz)
   local rkT0 = map.id or (map.def and map.def.id) or map
   local slot = MOUND.TRUNK.cache[rkT0]
   if slot then consider(slot.parts, 0, 0) end
+  local saplingSlot = MOUND.TRUNK.sapcache[rkT0]
+  if saplingSlot then consider(saplingSlot.parts, 0, 0) end
   for _, nb in ipairs(state.neighbors or {}) do
     local rkT = (nb.map and (nb.map.id or (nb.map.def and nb.map.def.id)))
                 or nb.map
     local ts = MOUND.TRUNK.nbcache[rkT]
     if ts then consider(ts.parts, nb.ox or 0, nb.oy or 0) end
+    local ss = MOUND.TRUNK.sapnbcache[rkT]
+    if ss then consider(ss.parts, nb.ox or 0, nb.oy or 0) end
   end
   return best, bestOx or 0, bestOz or 0
 end
@@ -7161,48 +7861,34 @@ function Flora.battleProps(host, neighbors, arena)
   local px = (arena and arena.mid and arena.mid[1]) or 0
   local pz = (arena and arena.mid and arena.mid[2]) or 0
   local rkT0 = host and (host.id or (host.def and host.def.id)) or host
-  local slot = MOUND.TRUNK.cache[rkT0]
-  if slot then
+  local function drawBattleSlot(slot, ox, oz, current)
+    if not slot then return end
+    ox, oz = ox or 0, oz or 0
+    local model = (ox ~= 0 or oz ~= 0) and Mat4.translate(ox, 0, oz) or nil
     if slot.parts then
-      pcall(MOUND.drawTreeParts, slot.parts, 0, 0, px, pz,
-            nil, nil, true, false)
+      pcall(MOUND.drawTreeParts, slot.parts, ox, oz, px, pz,
+            model, nil, current, false)
     end
     if slot.trunks and MOUND.barkImg() then
-      pcall(Voxel3D.draw, slot.trunks, MOUND.barkImg(), nil)
+      pcall(Voxel3D.draw, slot.trunks, MOUND.barkImg(), model)
     end
     if slot.stones and MOUND.stoneImg() then
-      pcall(Voxel3D.draw, slot.stones, MOUND.stoneImg(), nil)
+      pcall(Voxel3D.draw, slot.stones, MOUND.stoneImg(), model)
     end
     if slot.hoods and MOUND.leafyImg() then
-      pcall(Voxel3D.draw, slot.hoods, MOUND.leafyImg(), nil)
+      pcall(Voxel3D.draw, slot.hoods, MOUND.leafyImg(), model)
     end
     if slot.detail and MOUND.detailImg() then
-      pcall(Voxel3D.draw, slot.detail, MOUND.detailImg(), nil)
+      pcall(Voxel3D.draw, slot.detail, MOUND.detailImg(), model)
     end
   end
+  drawBattleSlot(MOUND.TRUNK.cache[rkT0], 0, 0, true)
+  drawBattleSlot(MOUND.TRUNK.sapcache[rkT0], 0, 0, true)
   for _, nb in ipairs(neighbors or {}) do
     local rkT = (nb.map and (nb.map.id or (nb.map.def and nb.map.def.id)))
                 or nb.map
-    local ts = MOUND.TRUNK.nbcache[rkT]
-    if ts then
-      local model = Mat4.translate(nb.ox or 0, 0, nb.oy or 0)
-      if ts.parts then
-        pcall(MOUND.drawTreeParts, ts.parts, nb.ox or 0, nb.oy or 0,
-              px, pz, model, nil, false, false)
-      end
-      if ts.trunks and MOUND.barkImg() then
-        pcall(Voxel3D.draw, ts.trunks, MOUND.barkImg(), model)
-      end
-      if ts.stones and MOUND.stoneImg() then
-        pcall(Voxel3D.draw, ts.stones, MOUND.stoneImg(), model)
-      end
-      if ts.hoods and MOUND.leafyImg() then
-        pcall(Voxel3D.draw, ts.hoods, MOUND.leafyImg(), model)
-      end
-      if ts.detail and MOUND.detailImg() then
-        pcall(Voxel3D.draw, ts.detail, MOUND.detailImg(), model)
-      end
-    end
+    drawBattleSlot(MOUND.TRUNK.nbcache[rkT], nb.ox, nb.oy, false)
+    drawBattleSlot(MOUND.TRUNK.sapnbcache[rkT], nb.ox, nb.oy, false)
   end
 end
 
@@ -7234,5 +7920,15 @@ end
 _G.__ds_live = rawget(_G, "__ds_live") or {}
 _G.__ds_live.Flora = Flora
 _G.__ds_live.V = _G.__ds_live.V or V
+
+-- Coarse probes leave the per-leaf/per-quad loops and all scheduling intact.
+MOUND.buildTrunks = MOUND.Timings.wrap("tree_build", MOUND.buildTrunks)
+MOUND.packTreeStream = MOUND.Timings.wrap("tree_pack", MOUND.packTreeStream)
+MOUND.meshFromTreeStream = MOUND.Timings.wrap("tree_upload", MOUND.meshFromTreeStream)
+MOUND.publishTreePart = MOUND.Timings.wrap("tree_upload", MOUND.publishTreePart)
+MOUND.uploadTreeCache = MOUND.Timings.wrap("tree_upload", MOUND.uploadTreeCache)
+MOUND.treeCacheSignature = MOUND.Timings.wrap("tree_keys", MOUND.treeCacheSignature)
+MOUND.drawTreeParts = MOUND.Timings.wrap("tree_draw", MOUND.drawTreeParts)
+Flora.drawCommunityTrees = MOUND.Timings.wrap("tree_other", Flora.drawCommunityTrees)
 
 return Flora

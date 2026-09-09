@@ -310,6 +310,9 @@ function BattleArena.find(map, fromX, fromY, surfing)
         -- which camera rig this spot is framed for; nil is the default long
         -- lens, "close" the short one small rooms need (see BattleCam)
         arena.cam = pick.cam
+        arena.cameraSafe = pick.cameraSafe
+        arena.orbitCap = pick.orbitCap
+        arena.pitchCap = pick.pitchCap
         return arena
       end
     end

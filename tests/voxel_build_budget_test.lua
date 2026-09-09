@@ -54,7 +54,13 @@ local function replaceUpvalue(fn, wanted, replacement)
 end
 local function mesher(job)
   local m = assert(loadfile('lib/ChunkMesher.lua'))({
-    require = function(name) return name == 'BuildBudget' and Budget or {} end,
+    require = function(name)
+      if name == 'LoadTimings' then return {
+        wrap = function(_, fn) return fn end,
+        resume = coroutine.resume, cancel = function() end, jobError = function() end,
+      } end
+      return name == 'BuildBudget' and Budget or {}
+    end,
   })
   -- Replace GPU geometry only; exercise the actual queue, priorities, deadline,
   -- coroutine lifecycle and failure handling without a ROM or graphics device.
