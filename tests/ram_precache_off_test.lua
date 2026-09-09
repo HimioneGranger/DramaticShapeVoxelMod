@@ -43,6 +43,11 @@ end
 local map = { id = "ROUTE_1" }
 local terrain = { n = 1, chunks = { string.rep("v", 24) }, spans = { 0, 1, 8, 8 } }
 Disk.beginSession(true)
+T.eq(Disk.available(), false, "OFF skips compressed-cache work even without storage")
+T.check(Disk.saveTerrain(map, "full", nil, terrain, { n = 0 }), "OFF live build can finish")
+T.eq(Disk.ramStats().bytes, 0, "OFF retains zero compressed bytes")
+T.eq(Disk.ramStats().files, 0, "OFF retains zero records")
+Disk.beginSession(true, true)
 T.check(Disk.available(), "session RAM works without a persistent backend")
 T.eq(Disk.loadTerrain(map, "full"), nil, "uncached OFF map requests live generation")
 T.check(Disk.saveTerrain(map, "full", nil, terrain, { n = 0 }), "generated terrain saves to RAM")
@@ -55,8 +60,8 @@ T.eq(writes, 0, "live generation did not write persistent storage")
 T.check(Disk.saveRamToDisk(), "explicit SAVE still works")
 T.eq(writes, 1, "only explicit SAVE writes disk")
 Disk.setSessionOnly(false)
-Disk.setSessionOnly(true)
-T.eq(Disk.ramStats().files, 1, "OFF retains generated data even after explicit SAVE")
+Disk.setSessionOnly(true, true)
+T.eq(Disk.ramStats().files, 1, "LIVE CACHE retains generated data even after explicit SAVE")
 local savedGc = collectgarbage
 collectgarbage = nil
 T.check(pcall(Disk.dropRam), "DROP is safe without a garbage-collection API")

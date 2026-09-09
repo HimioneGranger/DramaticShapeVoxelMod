@@ -1,5 +1,6 @@
 -- Session RAM budget for compressed voxel containers loaded at CONTINUE.
--- OFF generates only live areas and retains generated records in session RAM.
+-- OFF retains no compressed precache records. LIVE CACHE explicitly retains
+-- only records generated during play, without speculative loading.
 -- Other values permit persistent reads and predictive loading; FULL is uncapped.
 
 local V = ...
@@ -9,14 +10,18 @@ local RamPrecache = {}
 
 RamPrecache.setting = ModSetting.new(
   "ramPrecacheMb", "RAM PRECACHE MB",
-  { 256, 512, 768, 1024, 1536, 2048, 2560, 3072, false, 0 },
+  { 256, 512, 768, 1024, 1536, 2048, 2560, 3072, false, 0, "session" },
   { "256", "512", "768", "1024", "1536", "2048", "2560", "3072",
-    "FULL", "OFF" })
+    "FULL", "OFF", "LIVE CACHE" })
 
 function RamPrecache.bytes()
   local mb = RamPrecache.setting:get()
   if mb == false then return nil end -- nil means uncapped/FULL
   return math.max(0, tonumber(mb) or 0) * 1024 * 1024
+end
+
+function RamPrecache.retainGenerated()
+  return RamPrecache.setting:get() == "session"
 end
 
 function RamPrecache.off()

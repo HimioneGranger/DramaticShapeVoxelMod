@@ -165,7 +165,11 @@ function Screen:startNext()
         masks = Precache.masksFor(StaticGeometry.data() or self.game.data,
                                   job.id)
       end
-      if MeshDisk.complete(map, job.bodyOnly, masks) then
+      local visuals = V.require("CommunityVisuals")
+      local treesSelected = visuals.customTrees() or visuals.customCutTrees() or visuals.customForest()
+      -- A terrain hit alone does not certify optional Legendary section records.
+      -- Queue its cheap restoration and tree-cache validation as part of this job.
+      if not treesSelected and MeshDisk.complete(map, job.bodyOnly, masks) then
         self.skipped = self.skipped + 1
         self.index = self.index + 1
       else

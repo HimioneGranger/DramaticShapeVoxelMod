@@ -24,9 +24,9 @@ end
 
 local RamPrecache = V.require("RamPrecache")
 local setting = RamPrecache.setting
-local expected = { 256, 512, 768, 1024, 1536, 2048, 2560, 3072, false, 0 }
+local expected = { 256, 512, 768, 1024, 1536, 2048, 2560, 3072, false, 0, "session" }
 local labels = { "256", "512", "768", "1024", "1536", "2048", "2560",
-                 "3072", "FULL", "OFF" }
+                 "3072", "FULL", "OFF", "LIVE CACHE" }
 
 T.eq(setting.label, "RAM PRECACHE MB", "the performance row has its final label")
 T.eq(#setting.values, #expected, "the ladder has exactly the requested rungs")

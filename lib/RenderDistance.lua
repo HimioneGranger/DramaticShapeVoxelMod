@@ -16,13 +16,18 @@ local RenderDistance = {}
 -- legacy behavior for screenshots or unusually wide survey views.
 RenderDistance.setting = ModSetting.new(
   "renderDistance", "R.DIST",
-  { 16, 32, 64, false },
-  { "SHORT", "MEDIUM", "FAR", "FULL" },
+  { 16, 32, 64, false, "auto" },
+  { "LOW", "MEDIUM", "FAR", "FULL", "AUTO" },
   2)
 
 function RenderDistance.radius()
   local ok, cells = pcall(RenderDistance.setting.get, RenderDistance.setting)
   if not ok or cells == false then return nil end
+  if cells == "auto" then
+    local okP, platform = pcall(require, "src.core.Platform")
+    local caps = okP and platform.detect and platform.detect() or {}
+    cells = (caps.mobile or caps.console or caps.nx) and 16 or 32
+  end
   cells = tonumber(cells)
   if not cells then return nil end
   return math.max(16, math.min(64, cells)) * 16
@@ -59,6 +64,16 @@ function RenderDistance.neighbor(nb, player)
   local dx = px < x0 and (x0 - px) or (px > x1 and (px - x1) or 0)
   local dy = py < y0 and (y0 - py) or (py > y1 and (py - y1) or 0)
   return dx * dx + dy * dy <= radius * radius
+end
+
+-- Bounding-circle test for spatial batches. A crown intersecting the radius
+-- remains visible even when the section centre lies just beyond it.
+function RenderDistance.section(x, y, extent, player)
+  local radius = RenderDistance.radius()
+  local px, py = playerPoint(player)
+  if not radius or not px then return true end
+  local dx, dy = x - px, y - py
+  return dx * dx + dy * dy <= (radius + (extent or 0)) ^ 2
 end
 
 return RenderDistance

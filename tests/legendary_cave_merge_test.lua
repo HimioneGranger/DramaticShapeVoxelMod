@@ -31,7 +31,7 @@ local Disk = assert(loadfile('lib/VoxelMeshDisk.lua'))({
 })
 Disk.staticEligible = function() return true end
 Disk.fingerprint = function(map, slot) return map.id .. ':' .. slot end
-Disk.beginSession(true)
+Disk.beginSession(true, true)
 local map = { id = 'MERGE_TEST' }
 local terrain = { n = 1, chunks = { string.rep('t', 24) }, spans = {0, 1, 8, 8} }
 local sign = { n = 1, chunks = { string.rep('s', 24) } }
@@ -61,8 +61,8 @@ for i = 1, 100 do
 end
 check(Disk.saveRamToDisk() and writes == 2, 'only explicit save persists both records')
 Disk.dropRam()
-check(Disk.loadTerrain(map, 'full') == nil, 'OFF cannot reload the persisted terrain')
-check(#Disk.ramPlan() == 0 and reads == 0 and lists == 0, 'OFF never reads or scans storage')
+check(Disk.loadTerrain(map, 'full') == nil, 'LIVE CACHE cannot reload the persisted terrain')
+check(#Disk.ramPlan() == 0 and reads == 0 and lists == 0, 'LIVE CACHE never reads or scans storage')
 Disk.setSessionOnly(false)
 check(Disk.loadTerrain(map, 'full').registry == 'registry' and reads == 1,
       'normal mode can load the complete combined record')
@@ -117,5 +117,6 @@ check(not options.customTower() and not options.customCaves() and not options.cu
 options.trees.value = 'n64memory'
 check(options.customTrees() and options.fullTreeDetail(), 'saved Legendary tree choice retains full detail')
 options.trees.value = 'n64memory_fast'
+options.treeDetail.value = 'balanced'
 check(options.customTrees() and not options.fullTreeDetail(), 'lighter tree geometry is a separate opt-in')
 print(checks .. ' checks passed (Legendary cave merge)')

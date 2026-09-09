@@ -480,6 +480,8 @@ end
 -- update + render). Keep stable masks/live metadata and reuse the output arrays.
 local neighborhood = { map = nil, count = 0, rows = {} }
 local cachedMasks = {}
+local lastTreeLiveKey
+local CacheTrace = V.require("CacheTrace")
 local nbMeshBuf, nbWaterBuf, nbVisualShadowBuf = {}, {}, {}
 local lastCompleteCanvas, lastCompleteW, lastCompleteH = nil, 0, 0
 local lastCompleteMapId = nil
@@ -525,7 +527,6 @@ local function rebuildNeighborhood(state)
   for i = #nbs + 1, #neighborhood.rows do neighborhood.rows[i] = nil end
 
   cachedMasks = masks
-  ChunkMesher.setLive(live)
   TerrainAtlas.setLive(live)
   SafariFoliage.setLive(live)
   SafariStatues.setLive(live)
@@ -544,6 +545,20 @@ end
 function VoxelScene.prefetch(state)
   local Voxel = V.require("VoxelState")
 
+  local live, ids = { [state.map.id] = true }, { state.map.id }
+  for _, nb in ipairs(state.neighbors or {}) do
+    if RenderDistance.neighbor(nb, state.player) then
+      live[nb.map.id] = true
+      ids[#ids + 1] = nb.map.id
+    end
+  end
+  table.sort(ids)
+  local liveKey = table.concat(ids, "|")
+  if liveKey ~= lastTreeLiveKey then
+    CacheTrace.log("live-set", state.map.id, "from=" .. tostring(lastTreeLiveKey) .. " to=" .. liveKey)
+    lastTreeLiveKey = liveKey
+    ChunkMesher.setLive(live)
+  end
   if neighborhoodChanged(state) then
     rebuildNeighborhood(state)
   end

@@ -380,7 +380,7 @@ mod.content.render_pipelines:register("voxel", {
     -- while voxel mode is OFF still invalidates what is cached.
     voidFill.check()
     local ramOnly = RamPrecache.off()
-    local policyChanged = VoxelMeshDisk.setSessionOnly(ramOnly)
+    local policyChanged = VoxelMeshDisk.setSessionOnly(ramOnly, RamPrecache.retainGenerated())
     if ramOnly then VoxelPrecache.reset() end
     local Game = require("src.core.Game")
     if policyChanged and not ramOnly then VoxelMeshDisk.bind(Game, false) end
@@ -388,7 +388,7 @@ mod.content.render_pipelines:register("voxel", {
     local ow = Game and Game.overworld
     if ow and ow.map and ow.camera then
       -- Also covers enabling/reloading the mod after the title menu.
-      VoxelMeshDisk.beginSession(ramOnly)
+      VoxelMeshDisk.beginSession(ramOnly, RamPrecache.retainGenerated())
       pcall(V.require("LoadTimings").call, "prefetch", VoxelScene.prefetch, ow)
       -- Once the visible neighbourhood is ready, cooperatively prepare the
       -- current map's real warp/connection destinations.  This is automatic:
@@ -716,6 +716,10 @@ local SETTINGS = {
     .. "Tower fog. Changing this live preserves the current cloud phase; "
     .. "NORMAL is TEST134's approved motion.",
     full = true },
+  { CommunityVisuals.treeDetail,
+    "FULL retains the approved foliage. BALANCED and HANDHELD remove decorative "
+    .. "shells, keep near crossed-card silhouettes, and thin distant bunches. "
+    .. "Tree positions and sizes stay fixed; R.DIST bounds neighbor work.", full = true },
   { CommunityVisuals.trees,
     "Choose Battle Art's authored round trees or the finalized Legendary Visuals "
     .. "small, medium, large and mature XL tree family. LEGENDARY FAST uses "
@@ -785,8 +789,8 @@ local SETTINGS = {
   { RamPrecache.setting,
     "Maximum compressed voxel cache eagerly loaded after CONTINUE, in MiB. "
     .. "FULL loads every generated cache file; OFF skips the preload and "
-    .. "predictive loading on every platform. OFF generates live areas and "
-    .. "keeps their cache in session RAM without automatic disk reads.",
+    .. "predictive loading on every platform and retains zero compressed records. "
+    .. "LIVE CACHE explicitly keeps generated records in RAM without preloading.",
     full = true },
   { Water.setting,
     "Reflections on water. FULL adds screen-space reflections of the "
@@ -1510,7 +1514,7 @@ mod.hooks:wrap("ui.title_menu.items", function(next, game, items)
       local continue = item.onSelect
       item.onSelect = function()
         local limit = RamPrecache.bytes()
-        VoxelMeshDisk.beginSession(limit == 0)
+        VoxelMeshDisk.beginSession(limit == 0, RamPrecache.retainGenerated())
         if limit == 0 or not VoxelMeshDisk.available() then
           VoxelPrecache.reset()
           continue()
@@ -1540,7 +1544,7 @@ mod.hooks:wrap("ui.title_menu.items", function(next, game, items)
         -- may later be persisted with pause-menu CACHE -> SAVE.
         newGame()
         if not RamPrecache.off() then VoxelMeshDisk.bind(game, false) end
-        VoxelMeshDisk.beginSession(RamPrecache.off())
+        VoxelMeshDisk.beginSession(RamPrecache.off(), RamPrecache.retainGenerated())
         if RamPrecache.off() then VoxelPrecache.reset() end
       end
     end
@@ -1718,6 +1722,7 @@ do
       local after = self:blockAt(bx, by)
       if self.id and after ~= before then
         if isolateCommunityCut(self, bx, by, before, after) then
+          V.require("CommunityFlora").treeChanged(self)
           Companion:worldChanged("map.setBlock.cut")
         else
           ChunkMesher.refresh(self.id, bx, by, self, before)

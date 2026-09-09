@@ -12,6 +12,10 @@
 -- observe directly.
 
 local V = ...
+local traceOK, CacheTrace = pcall(V.require, "CacheTrace")
+if not traceOK or type(CacheTrace) ~= "table" or type(CacheTrace.log) ~= "function" then
+  CacheTrace = { log = function() end }
+end
 
 local Budget = V.require("BuildBudget")
 local Timings = V.require("LoadTimings")
@@ -28,6 +32,7 @@ end
 local Disk = {}
 local ramFiles, sessionActive = {}, false
 local sessionOnly = false
+local retainGenerated = false
 local ramDirty, ramRejected, ramGenerated = {}, {}, {}
 local ramBytes = 0
 local storage
@@ -99,7 +104,8 @@ local FORMAT = 2
 local RAW_CHUNK = 1024 * 1024
 
 local function available()
-  return (storage ~= nil or sessionActive)
+  return not (sessionActive and sessionOnly and not retainGenerated)
+    and (storage ~= nil or sessionActive)
     and love and love.data and love.data.pack and love.data.unpack
     and love.data.newByteData and love.data.compress and love.data.decompress
     and love.graphics and love.graphics.newMesh
@@ -600,7 +606,7 @@ end
 
 local function treeFingerprint(map, recipe, signature)
   return Disk.fingerprint(map, "body", nil, "trees")
-         .. "|tree-stream-v1|recipe|" .. tostring(recipe)
+         .. "|tree-stream-v2-sections-lod|recipe|" .. tostring(recipe)
          .. "|placement|" .. tostring(signature)
 end
 
@@ -705,23 +711,23 @@ function Disk.ramPlan(priority)
   return names, bytes
 end
 
--- Switching OFF drops clean disk-preloaded records, but retains records built
--- during play (including unsaved edits). No filesystem calls or full GC here.
-function Disk.setSessionOnly(enabled)
-  enabled = enabled == true
-  if sessionOnly == enabled then return false end
-  sessionOnly = enabled
+-- OFF drops every compressed record. LIVE CACHE explicitly retains generated
+-- records, but never preloads from disk. No filesystem calls or full GC here.
+function Disk.setSessionOnly(enabled, keepGenerated)
+  enabled, keepGenerated = enabled == true, keepGenerated == true
+  if sessionOnly == enabled and retainGenerated == keepGenerated then return false end
+  sessionOnly, retainGenerated = enabled, keepGenerated
   if enabled then
     for path in pairs(ramFiles) do
-      if not ramGenerated[path] then discard(path) end
+      if not retainGenerated or not ramGenerated[path] then discard(path) end
     end
   end
   return true
 end
 
-function Disk.beginSession(ramOnly)
+function Disk.beginSession(ramOnly, keepGenerated)
   sessionActive = true
-  if ramOnly ~= nil then Disk.setSessionOnly(ramOnly) end
+  if ramOnly ~= nil then Disk.setSessionOnly(ramOnly, keepGenerated) end
 end
 
 function Disk.beginPrecache()
@@ -804,6 +810,7 @@ local function fingerprintDifference(actual, expected)
 end
 
 local function reportMismatch(map, path, actual, expected, detail)
+  CacheTrace.log("reject-fingerprint", map and map.id, path .. " " .. (detail or fingerprintDifference(actual, expected)))
   StaticGeometry.record(map and map.id, "cache.record", path,
     detail or fingerprintDifference(actual, expected))
 end
@@ -971,13 +978,15 @@ local function streamRecord(blob, pos, yieldFn)
 end
 
 local function readValidated(path, fp, map)
-  if not available() then return nil end
+  if not available() then CacheTrace.log("cache-unavailable", map and map.id, path); return nil end
   local blob = ramFiles[path]
+  if blob then CacheTrace.log("ram-hit", map and map.id, path) end
   if not blob then
-    if (sessionActive and sessionOnly) or not storage then return nil end
-    if sessionActive and ramRejected[path] then return nil end
+    if (sessionActive and sessionOnly) or not storage then CacheTrace.log("cache-policy-skip", map and map.id, path); return nil end
+    if sessionActive and ramRejected[path] then CacheTrace.log("cache-rejected-session", map and map.id, path); return nil end
     local ok, loaded = pcall(storage.readBytes, storage, path)
-    if not ok or not loaded then return nil end
+    if not ok or not loaded then CacheTrace.log("disk-miss", map and map.id, path); return nil end
+    CacheTrace.log("disk-hit", map and map.id, path .. " bytes=" .. #loaded)
     blob = loaded
     knownSizes[path] = #blob
     if sessionActive then
@@ -985,6 +994,7 @@ local function readValidated(path, fp, map)
       ramBytes = ramBytes + #blob
     end
   end
+  CacheTrace.log("cache-validate", map and map.id, path)
   local pos, actual = parseHeader(blob, fp)
   if not pos then
     reportMismatch(map, path, actual, fp,
@@ -1142,7 +1152,11 @@ function Disk.loadTreeParts(map, recipe, signature, yieldFn)
     local meta, nextPos = float4(blob, pos)
     if not meta then discard(path, true); return nil end
     pos = nextPos
-    local part = { x = meta[1], y = meta[2], z = meta[3], radius = meta[4] }
+    local flags, farCount = readU32(blob, pos), readU32(blob, pos + 4)
+    if not flags or flags > 1 or not farCount then discard(path, true); return nil end
+    pos = pos + 8
+    local part = { x = meta[1], y = meta[2], z = meta[3], radius = meta[4],
+                   apron = flags == 1, detailFarCount = farCount }
     for _, name in ipairs(TREE_MATERIALS) do
       local stream
       stream, pos = streamRecord(blob, pos, yieldFn)
@@ -1244,6 +1258,8 @@ local function encoded(fp, writer)
 end
 
 local function writeFile(path, fp, writer)
+  -- OFF does not even encode a throwaway compressed copy of live GPU geometry.
+  if sessionActive and sessionOnly and not retainGenerated then return true end
   if not available() then
     local err = "cache backend unavailable (" .. tostring(backendKind) .. ")"
     recordWriteFailure(path, "backend", err)
@@ -1404,6 +1420,8 @@ function Disk.saveTreeParts(map, recipe, signature, parts, yieldFn)
     write(file, u32(#(parts.parts or {})))
     for _, part in ipairs(parts.parts or {}) do
       write(file, f32x4(part.x, part.y, part.z, part.radius))
+      write(file, u32(part.apron and 1 or 0))
+      write(file, u32(part.detailFarCount or 0))
       for _, name in ipairs(TREE_MATERIALS) do
         assert(writeChunked(file, part[name], yieldFn))
       end

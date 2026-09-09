@@ -64,6 +64,14 @@ local Voxel3D = V.require("Voxel3D")
 local Budget = V.require("BuildBudget")
 local Timings = V.require("LoadTimings")
 local MeshDisk = V.require("VoxelMeshDisk")
+local traceOK, CacheTrace = pcall(V.require, "CacheTrace")
+if not traceOK or type(CacheTrace) ~= "table" or type(CacheTrace.log) ~= "function" then
+  CacheTrace = { log = function() end }
+end
+local function trees(method, ...)
+  local ok, flora = pcall(V.require, "CommunityFlora")
+  if ok and flora and type(flora[method]) == "function" then return flora[method](...) end
+end
 local CommunityVisuals = V.require("CommunityVisuals")
 
 local ffi = nil
@@ -3477,6 +3485,8 @@ local function jobKey(id, slot)
 end
 
 local function finishJob(job, ok, err)
+  CacheTrace.log(ok and "job-done" or "job-failed", job.id, "slot=" .. job.slot .. " error=" .. tostring(err))
+  if not ok and job.cancel then job.cancel() end
   local key = jobKey(job.id, job.slot)
   jobIndex[key] = nil
   for i, j in ipairs(jobs) do
@@ -3502,6 +3512,8 @@ end
 -- job was queued under -- invalidate/evict bump it to cancel in-flight
 -- work whose inputs went stale.
 local function runJob(job)
+  CacheTrace.log("job-start", job.id, "slot=" .. job.slot)
+  if job.work then return job.work() end
   local map = job.map
   local c = entry(job.id)
   local function current()
@@ -3513,6 +3525,7 @@ local function runJob(job)
     if MeshDisk.available() then
       local aux = MeshDisk.loadAux(map)
       if not aux then
+        CacheTrace.log("build-aux", job.id, "cache miss")
         aux = buildRawAux(map)
         if not current() then return end
         local savedAux, auxError = MeshDisk.saveAux(map, aux)
@@ -3559,6 +3572,7 @@ local function runJob(job)
   local cached = not sessionVessel and not job.bypassCache
     and MeshDisk.loadTerrain(map, job.slot, job.masks) or nil
   if cached then
+    CacheTrace.log("upload-cached", job.id, "slot=" .. job.slot)
     restoreRegistrySnapshot(map, cached.registry)
     mesh = meshFromRaw(cached.terrain)
     water = meshFromRaw(cached.water)
@@ -3572,6 +3586,7 @@ local function runJob(job)
     end
     if not next(visualMeshes) then visualMeshes = nil end
   else
+    CacheTrace.log("build-terrain", job.id, "slot=" .. job.slot)
     local annotatedVisuals = mapHasVisualObjects(map)
     local sink, waterSink = newSink(), newSink()
     local visualSinks = annotatedVisuals and {} or nil
@@ -3626,6 +3641,7 @@ local function runJob(job)
       c.stale = nil
     end
   end
+  trees("requestCommunityTrees", map, job.masks, job.priority, job.slot == "body")
 end
 
 -- Queue a build unless the slot is already cached or queued. Returns the
@@ -3650,11 +3666,15 @@ function ChunkMesher.request(map, bodyOnly, masks, priority)
   local slot = bodyOnly and "body" or "full"
   local c = cache[map.id]
   local stale = c and c.stale and (c.stale[slot] or c.stale.aux)
-  if c and c[slot] ~= nil and not stale then return c[slot] or nil end
+  if c and c[slot] ~= nil and not stale then
+    trees("ensureCommunityTrees", map, masks, priorityValue(priority), bodyOnly)
+    return c[slot] or nil
+  end
   local key = jobKey(map.id, slot)
   local job = jobIndex[key]
   local requested = priorityValue(priority)
   if not job then
+    CacheTrace.log("queue", map.id, "slot=" .. slot .. " priority=" .. requested)
     jobFailures[key] = nil
     job = { id = map.id, map = map, slot = slot, masks = masks,
             priority = requested, gen = gen[map.id] or 0,
@@ -3681,6 +3701,36 @@ function ChunkMesher.request(map, bodyOnly, masks, priority)
   return (c and c[slot]) or nil
 end
 
+-- Presentation jobs share terrain's coroutine budget and cancellation lifecycle.
+function ChunkMesher.requestWork(map, name, signature, priority, work, cancel)
+  local slot = "work-" .. name
+  local key = jobKey(map.id, slot)
+  local prior = jobIndex[key]
+  if prior and prior.signature == signature then
+    prior.priority = math.max(prior.priority or 0, priority or 0)
+    return false
+  end
+  if prior then
+    if prior.cancel then prior.cancel() end
+    for i = #jobs, 1, -1 do if jobs[i] == prior then table.remove(jobs, i) end end
+  end
+  local job = { id = map.id, map = map, slot = slot, signature = signature,
+    priority = priority or 0, gen = gen[map.id] or 0, work = work, cancel = cancel }
+  jobIndex[key] = job
+  jobs[#jobs + 1] = job
+  CacheTrace.log("queue", map.id, slot .. " priority=" .. job.priority)
+  return true
+end
+
+function ChunkMesher.cancelWork(mapId, name)
+  local key = jobKey(mapId, "work-" .. name)
+  local job = jobIndex[key]
+  if not job then return end
+  if job.cancel then job.cancel() end
+  jobIndex[key] = nil
+  for i = #jobs, 1, -1 do if jobs[i] == job then table.remove(jobs, i) end end
+end
+
 function ChunkMesher.pending()
   return #jobs
 end
@@ -3703,6 +3753,8 @@ end
 -- probe; a failed build and a completed build both stop being pending.
 function ChunkMesher.jobPending(mapId, bodyOnly)
   return jobIndex[jobKey(mapId, bodyOnly and "body" or "full")] ~= nil
+    or jobIndex[jobKey(mapId, "work-legendary-mature")] ~= nil
+    or jobIndex[jobKey(mapId, "work-legendary-sapling")] ~= nil
 end
 
 -- A completed and a failed coroutine both disappear from jobPending(). Keep
@@ -3711,7 +3763,10 @@ end
 -- as before and ordinary rendering continues to fail open.
 function ChunkMesher.takeJobFailure(mapId, bodyOnly)
   local key = jobKey(mapId, bodyOnly and "body" or "full")
-  local err = jobFailures[key]
+  local err = jobFailures[key] or jobFailures[jobKey(mapId, "work-legendary-mature")]
+    or jobFailures[jobKey(mapId, "work-legendary-sapling")]
+  jobFailures[jobKey(mapId, "work-legendary-mature")] = nil
+  jobFailures[jobKey(mapId, "work-legendary-sapling")] = nil
   jobFailures[key] = nil
   return err
 end
@@ -4011,6 +4066,8 @@ end
 -- the part of it that moved, so a felled tree goes on the frame it was cut
 -- rather than waiting out the rebuild. Called without them, nothing changes.
 function ChunkMesher.refresh(mapId, bx, by, map, before)
+  trees("evictTrees", mapId)
+  CacheTrace.log("refresh", mapId, "block=" .. tostring(bx) .. "," .. tostring(by))
   if not mapId then return ChunkMesher.invalidate() end
   -- Never erase the immutable persistent record. Some engine/mod paths emit a
   -- conservative block notification while loading an area even when its final
@@ -4027,6 +4084,7 @@ function ChunkMesher.refresh(mapId, bx, by, map, before)
   for i = #jobs, 1, -1 do
     local job = jobs[i]
     if job.id == mapId then
+      if job.cancel then job.cancel() end
       jobIndex[jobKey(job.id, job.slot)] = nil
       table.remove(jobs, i)
     end
@@ -4052,8 +4110,10 @@ end
 local prevLive = {}
 
 function ChunkMesher.setLive(live)
+  trees("setLive", live)
   for id, c in pairs(cache) do
     if not live[id] and not prevLive[id] then
+      CacheTrace.log("evict-gpu", id, "outside current/previous live set")
       releaseEntry(c)
       cache[id] = nil
       gen[id] = (gen[id] or 0) + 1
@@ -4063,6 +4123,7 @@ function ChunkMesher.setLive(live)
   for i = #jobs, 1, -1 do
     local job = jobs[i]
     if not live[job.id] and not prevLive[job.id] then
+      if job.cancel then job.cancel() end
       jobIndex[jobKey(job.id, job.slot)] = nil
       table.remove(jobs, i)
     end
@@ -4076,6 +4137,8 @@ end
 -- become a complete copy of the world in GPU/RAM.  This differs from
 -- invalidate(), which also cancels queued work and discards live GPU meshes.
 function ChunkMesher.evictRuntime(mapId)
+  CacheTrace.log("evict-runtime", mapId, "disk records retained")
+  trees("evictTrees", mapId)
   local function evict(id)
     local c = cache[id]
     if c then releaseEntry(c) end
@@ -4094,6 +4157,7 @@ function ChunkMesher.evictRuntime(mapId)
   for i = #jobs, 1, -1 do
     local job = jobs[i]
     if mapId == nil or job.id == mapId then
+      if job.cancel then job.cancel() end
       jobIndex[jobKey(job.id, job.slot)] = nil
       table.remove(jobs, i)
     end
@@ -4104,7 +4168,9 @@ end
 -- Structures' analysis is derived from the same block layer, so it drops
 -- in the same breath; in-flight builds of the map are cancelled through
 -- the generation counter.
-function ChunkMesher.invalidate(mapId)
+function ChunkMesher.invalidate(mapId, reason)
+  CacheTrace.log("invalidate", mapId, reason or "unspecified caller")
+  trees("evictTrees", mapId)
   Structures.invalidate(mapId)
   if mapId then
     local c = cache[mapId]
@@ -4119,6 +4185,7 @@ function ChunkMesher.invalidate(mapId)
   for i = #jobs, 1, -1 do
     local job = jobs[i]
     if mapId == nil or job.id == mapId then
+      if job.cancel then job.cancel() end
       jobIndex[jobKey(job.id, job.slot)] = nil
       table.remove(jobs, i)
     end

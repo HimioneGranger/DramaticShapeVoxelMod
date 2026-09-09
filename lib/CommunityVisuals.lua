@@ -62,6 +62,23 @@ CommunityVisuals.trees = ModSetting.new(
   { "BATTLE ART", "LEGENDARY FULL", "LEGENDARY FAST" }
 )
 
+-- Preserve old FULL/FAST saves when no independent detail choice is stored.
+CommunityVisuals.treeDetail = ModSetting.new(
+  "communityTreeDetail", "TREE DETAIL",
+  { "full", "balanced", "handheld" },
+  { "FULL", "BALANCED", "HANDHELD" }
+)
+
+if CommunityVisuals.treeDetail.read then
+  local readDetail = CommunityVisuals.treeDetail.read
+  function CommunityVisuals.treeDetail:read()
+    if not self.index then
+      self.defaultIndex = CommunityVisuals.trees:get() == "n64memory" and 1 or 2
+    end
+    return readDetail(self)
+  end
+end
+
 CommunityVisuals.cutTrees = ModSetting.new(
   "communityCutTrees", "CUT TREES",
   { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }
@@ -111,6 +128,7 @@ CommunityVisuals.settings = {
   CommunityVisuals.caveDetails,
   CommunityVisuals.caveSound,
   CommunityVisuals.trees,
+  CommunityVisuals.treeDetail,
   CommunityVisuals.cutTrees,
   CommunityVisuals.signs,
   CommunityVisuals.grass,
@@ -178,8 +196,11 @@ end
 -- Preserve the existing saved Legendary selection as the approved full mode.
 -- Players can still select the untouched maximum-detail tree recipe for an
 -- immediate visual/performance comparison.
+function CommunityVisuals.treeDetailLevel()
+  return CommunityVisuals.treeDetail:get()
+end
 function CommunityVisuals.fullTreeDetail()
-  return CommunityVisuals.trees:get() == "n64memory"
+  return CommunityVisuals.treeDetailLevel() == "full"
 end
 
 function CommunityVisuals.customCutTrees()
