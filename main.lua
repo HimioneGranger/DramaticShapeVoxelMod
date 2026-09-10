@@ -737,6 +737,11 @@ local SETTINGS = {
     "Choose Battle Art's readable white sign or the Legendary Visuals low "
     .. "Kanto wayfinder with live location labels, including Viridian Forest.",
     full = true },
+  { CommunityVisuals.cityGround,
+    "Choose the original Lavender/Fuchsia tileset ground or Legendary Visuals' "
+    .. "city treatment. This is independent of GRASS, so Legendary route and "
+    .. "encounter turf can stay enabled without replacing city ground.",
+    full = true },
   { CommunityVisuals.grass,
     "Choose the original Overworld turf and encounter grass or TEST435's "
     .. "harmonized natural-green materials.", full = true },
@@ -1132,7 +1137,7 @@ local LEGENDARY_CATEGORIES = {
     CommunityVisuals.signs, CommunityVisuals.cutTrees,
   } },
   { id = "legendary_nature", label = "GRASS & TREES", settings = {
-    CommunityVisuals.grass, CommunityVisuals.trees,
+    CommunityVisuals.cityGround, CommunityVisuals.grass, CommunityVisuals.trees,
     CommunityVisuals.forest, ForestAtmos.setting,
   } },
   { id = "legendary_structures", label = "ROADS & STRUCTURES", settings = {

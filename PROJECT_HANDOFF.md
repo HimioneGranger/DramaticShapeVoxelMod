@@ -1,3 +1,32 @@
+# Issue #54 CITY GROUND option - 2026-09-10
+
+Branch `fix/issues54` starts from clean local/remote master `04b8643` (1.10.5).
+Issue #54 separates Lavender/Fuchsia city turf from the broad Legendary GRASS
+choice. New `CITY GROUND` defaults to `BATTLE ART`; `LEGENDARY VISUALS` keeps
+the existing custom city treatment. Lavender's previously unconditional custom
+ground now follows this row, while Fuchsia's existing tiled Legendary turf is
+selected by CITY GROUND instead of GRASS. Other Overworld maps continue to use
+GRASS unchanged. The new row lives under Legendary Visuals > GRASS & TREES and
+uses the existing CommunityVisuals live invalidation/persistence path.
+
+City-specific static and animated atlases are map-scoped so Lavender and
+Fuchsia cannot reuse one another's baked OVERWORLD animation entry by visit
+order. Persistent city terrain fingerprints now include a city-ground contract
+token and the CITY GROUND value while ignoring unrelated GRASS changes; other
+maps do not gain a CITY GROUND fingerprint dependency. Cache record format is
+unchanged, so cache revision remains 37.
+
+Focused standalone validation used the temporary Fengari Lua CLI because this
+Windows PATH has no native Lua/LuaJIT executable: `city_ground_option_test.lua`
+passes 21 checks (default/ownership matrix, geometry selection, persistent
+fingerprints and animated-atlas isolation), `grass_east_edge_test.lua` passes
+15, `voxel_build_budget_test.lua` passes 35, and
+`voxel_mesh_disk_storage_test.lua` passes 6. All changed Lua files parse and
+`git diff --check` passes. `ram_precache_setting_test.lua` cannot run from this
+standalone checkout because its engine-side `tests.modkit` fixture is absent.
+Native LuaJIT/engine gameplay and actual Lavender/Fuchsia visual comparison are
+still required before release. Draft branch is prepared for desktop QA; no deployment or cache-revision bump.
+
 # Local PR #52/#53 integration — 2026-09-09
 
 Branch `codex/legendary-pr52-pr53-integration` starts from the user's local

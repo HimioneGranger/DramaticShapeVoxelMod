@@ -564,13 +564,18 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   local viridianForest = CommunityVisuals.customForest()
     and tileset.id == "FOREST"
     and tostring(map.id or "") == "VIRIDIAN_FOREST"
-  -- TEST113 treats Lavender as a location identity, not an option-dependent
-  -- material tweak. TEST111 could silently miss the pass whenever the grass
-  -- and road controls were left on their Battle Art defaults.
-  local lavenderGround = tileset.id == "OVERWORLD"
-    and tostring(map.id or ""):upper() == "LAVENDER_TOWN"
+  local mapId = tostring(map.id or ""):upper()
+  local cityGroundMap = CommunityVisuals.isCityGroundMap(map)
+  -- CITY GROUND owns Lavender/Fuchsia independently of the broad GRASS row.
+  -- This lets Legendary route/encounter turf remain selected while either city
+  -- still uses its untouched Battle Art tileset ground.
+  local legendaryCityGround = cityGroundMap and CommunityVisuals.customCityGround()
+  local lavenderGround = legendaryCityGround and mapId == "LAVENDER_TOWN"
+  local fuchsiaGround = legendaryCityGround and mapId == "FUCHSIA_CITY"
+  local customGrass = CommunityVisuals.customGrass() and not cityGroundMap
+  local grassReplacement = customGrass or fuchsiaGround
   local towerInterior = tileset.id == "CEMETERY"
-    and tostring(map.id or ""):upper():match("^POKEMON_TOWER_[1-7]F$") ~= nil
+    and mapId:match("^POKEMON_TOWER_[1-7]F$") ~= nil
     and CommunityVisuals.customTower()
   local S = Structures.forMap(map)
   local perRow = tileset.tilesPerRow or 16
@@ -2518,7 +2523,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
             if finish == "wood" then
               kantoWoodTop(tx, ty, tx * 8, ty * 8, 0,
                            aoShades(tx, ty, 0, 1), finishAxis)
-            elseif finish == "grass" and CommunityVisuals.customGrass() then
+            elseif finish == "grass" and grassReplacement then
               kantoGrassTop(tx, ty, tx * 8, ty * 8, 0,
                             aoShades(tx, ty, 0, 1))
             else
@@ -2696,7 +2701,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
             kantoPavedTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))
           elseif paved == "wood" then
             kantoWoodTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))
-          elseif CommunityVisuals.customGrass() and tileset.id == "OVERWORLD"
+          elseif grassReplacement and tileset.id == "OVERWORLD"
                  and s.class == "ground" and topTile == KANTO_GRASS_TILE then
             kantoGrassTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))
           -- Legendary ledge masonry belongs to Kanto's outdoor terrain.

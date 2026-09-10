@@ -68,7 +68,7 @@ local TerrainAtlas = {}
 local cache = {}
 local cacheData = {}    -- the pixels behind the atlases we baked ourselves
 local community = {}    -- TEST435 material variants, keyed by live options
-local animated = {}     -- key -> one map's private, mutable animated atlas
+local animated = {}     -- key -> cached immutable prebuilt animation entry
                         -- false = given up on; nil = not built (or retrying)
 local attempts = {}     -- key -> consecutive failures, for the retry budget
 
@@ -641,7 +641,8 @@ local TALL_GRASS = {
 
 local function communityKey()
   return table.concat({
-    CommunityVisuals.grass:get(), CommunityVisuals.roads:get(),
+    CommunityVisuals.cityGround:get(), CommunityVisuals.grass:get(),
+    CommunityVisuals.roads:get(),
     CommunityVisuals.walls:get(), CommunityVisuals.courtyards:get(),
     CommunityVisuals.wallColor(), CommunityVisuals.caves:get(),
     CommunityVisuals.forest:get(), CommunityVisuals.tower:get(),
@@ -653,12 +654,18 @@ local function communityAtlas(map, colors, base, baked)
   local tilesetId = map.tileset and map.tileset.id
   local mapId = tostring(map.id or ""):upper()
   local cave = tilesetId == "CAVERN"
-  local lavenderGround = tilesetId == "OVERWORLD"
-    and mapId == "LAVENDER_TOWN"
+  local cityGroundMap = CommunityVisuals.isCityGroundMap(map)
+  local legendaryCityGround = cityGroundMap and CommunityVisuals.customCityGround()
+  local lavenderGround = legendaryCityGround and mapId == "LAVENDER_TOWN"
+  local fuchsiaGround = legendaryCityGround and mapId == "FUCHSIA_CITY"
+  -- GRASS remains the broad route/Overworld control. The two city maps use
+  -- CITY GROUND instead, so choosing Legendary grass cannot force their turf.
+  local grassEnabled = (not cityGroundMap and CommunityVisuals.customGrass())
+    or fuchsiaGround
   local towerInterior = tilesetId == "CEMETERY"
     and mapId:match("^POKEMON_TOWER_[1-7]F$") ~= nil
     and CommunityVisuals.customTower()
-  local overworldEnabled = CommunityVisuals.customGrass()
+  local overworldEnabled = grassEnabled or lavenderGround
     or CommunityVisuals.customRoads() or CommunityVisuals.customWalls()
     or CommunityVisuals.customCourtyards()
   local forestEnabled = tilesetId == "FOREST"
@@ -667,8 +674,7 @@ local function communityAtlas(map, colors, base, baked)
   -- Cave materials used to bypass every community-visual switch. Keep the
   -- original atlas untouched unless the dedicated CAVES row is opted in.
   if cave and not CommunityVisuals.customCaves() then return base, baked end
-  if not cave and tilesetId == "OVERWORLD"
-      and not overworldEnabled and not lavenderGround then
+  if not cave and tilesetId == "OVERWORLD" and not overworldEnabled then
     return base, baked
   end
   if not cave and tilesetId ~= "OVERWORLD"
@@ -678,9 +684,10 @@ local function communityAtlas(map, colors, base, baked)
   if not (love.image and love.image.newImageData and love.graphics
           and love.graphics.newImage) then return base, baked end
 
-  -- Lavender changes shared OVERWORLD donors only for one map, so its map id
-  -- must enter the atlas identity even when the renderer uses the base atlas.
-  local perMap = (lavenderGround or towerInterior
+  -- CITY GROUND changes shared OVERWORLD donors per map. Keep both city maps
+  -- isolated even on BATTLE ART: another Legendary Overworld atlas must never
+  -- leak its grass donor into a city whose own row is disabled.
+  local perMap = (cityGroundMap or towerInterior
       or (map.renderer and map.renderer.gbcAtlas))
     and tostring(map.id or "") or ""
   local key = map.tileset.image .. "#community-test137-tower-master-wall-options#" .. communityKey()
@@ -802,7 +809,7 @@ local function communityAtlas(map, colors, base, baked)
       paint(91, COURT_ART, COURT)
     end
 
-    if tilesetId == "OVERWORLD" and CommunityVisuals.customGrass() then
+    if tilesetId == "OVERWORLD" and grassEnabled then
       paint(44, GRASS_ART, GRASS)
       local tall = map.tileset.grassTile
       if type(tall) == "number" then tall = math.floor(tall) end
@@ -1225,10 +1232,12 @@ end
 -- No replacePixels / texture upload happens here.
 function TerrainAtlas.animate(map, colors, base, baked)
   -- RED++ bakes a per-MAP atlas, so its animated copy is per map too and
-  -- has to be evicted with the meshes (setLive below); the shared paths key
-  -- on the tileset and palette alone, which is bounded by how many of those
-  -- exist at all.
-  local perMap = map.renderer and map.renderer.gbcAtlas and map.id or nil
+  -- has to be evicted with the meshes (setLive below). CITY GROUND now has
+  -- the same requirement: Lavender and Fuchsia share the OVERWORLD source
+  -- atlas but can deliberately bake different ground into it, so their
+  -- immutable animation frames must never be shared by visit order.
+  local perMap = ((map.renderer and map.renderer.gbcAtlas)
+      or CommunityVisuals.isCityGroundMap(map)) and map.id or nil
   local caveMaterial = map.tileset and map.tileset.id == "CAVERN"
     and CommunityVisuals.customCaves()
     and "#legendary-natural-cave" or ""
@@ -1428,8 +1437,8 @@ end
 
 -- Release the animated copies of maps outside `live` (a set of map ids),
 -- the same neighbourhood ChunkMesher bounds its meshes to and called from
--- the same place. Only the per-map RED++ copies are held this way; the rest
--- are keyed by tileset and palette, of which a session sees a handful.
+-- the same place. Per-map RED++ and CITY GROUND copies are held this way;
+-- the rest are keyed by tileset and palette, of which a session sees a handful.
 -- Without this a cross-region trek accumulates one atlas and one texture
 -- per map ever entered, and each pins the engine's own baked ImageData
 -- alive behind it.
