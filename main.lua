@@ -2086,11 +2086,14 @@ mod.hooks:wrap("world.tod", function(next, tod, ctx)
   return DayNight.tod()
 end)
 
-mod.exports.version = "1.10.5"
+mod.exports.version = "1.10.6"
 mod.exports.battlePresentation = BattlePresentation.export()
 mod.exports.battleStage = BattleStage.export(OverworldBattle)
 mod.exports.voxel_companion = Companion.provider
 mod.exports.characterRenderers = CharacterRenderers.export()
+-- Read-only producer contract for standalone diagnostics mods. The consumer
+-- owns capture/reporting; Battle Art only exposes domain-specific counters.
+mod.exports.performance = V.require("PerformanceExport").export(mod.exports.version)
 -- exposed so a companion mod can pin its own tiles' shapes or read the
 -- camera without reaching into this mod's file layout
 mod.exports.lib = V

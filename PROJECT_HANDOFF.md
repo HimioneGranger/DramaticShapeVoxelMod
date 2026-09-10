@@ -1,3 +1,27 @@
+# Release 1.10.6 - performance profiler producer API
+
+Branch `feature/performance-profiler-v2` is versioned 1.10.6 in both `manifest.json` and `mod.exports.version`. Tag `1.10.6` should point at the published producer API commit.
+
+# Performance monitor producer API - 2026-09-10
+
+Branch `feature/performance-profiler-v2` exposes a stable read-only diagnostics
+provider at `mod.exports.performance` for the separate `performance-monitor`
+project. The monitor owns capture cadence, aggregation, reports and UI; Battle
+Art only publishes domain-specific telemetry. No dependency on performance-monitor
+was added.
+
+API/schema v1 returns detached snapshots of LoadTimings buckets, RAM/cache state,
+structured bounded cache events, ChunkMesher queue/cache pressure, Legendary tree
+cache stats, shadow target state and sapling edit counters. Persistent cache
+inventory is intentionally separate behind `storageSnapshot()` because it may call
+storage.list and should not contaminate high-rate performance samples. See `docs/PERFORMANCE_API.md`.
+
+CacheTrace now records a platform-neutral 64-event structured ring plus monotonic
+counters while retaining its existing desktop text log. ChunkMesher exposes only
+lightweight scalar/job descriptors; no map, mesh or coroutine ownership escapes.
+Focused standalone Fengari validation: `tests/performance_export_test.lua` passes
+16 checks; changed Lua files parse and `git diff --check` passes. Native engine
+integration with the separate monitor is still required before merging.
 # Issue #54 CITY GROUND option - 2026-09-10
 
 Branch `fix/issues54` starts from clean local/remote master `04b8643` (1.10.5).
