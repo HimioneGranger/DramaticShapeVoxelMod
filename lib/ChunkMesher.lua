@@ -567,19 +567,18 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   local mapId = tostring(map.id or ""):upper()
   local cityGroundMap = CommunityVisuals.isCityGroundMap(map)
   -- CITY GROUND owns Lavender/Fuchsia independently of the broad GRASS row.
-  -- This lets Legendary route/encounter turf remain selected while either city
-  -- still uses its untouched Battle Art tileset ground.
+  -- Lavender is intentionally fixed in both CITY GROUND modes: its authored
+  -- map alternates several flat ground donors, but the 3D treatment should
+  -- present all of them as Pallet Town's ordinary sparse lawn tile ($2C).
   local legendaryCityGround = cityGroundMap and CommunityVisuals.customCityGround()
-  local lavenderGround = legendaryCityGround and mapId == "LAVENDER_TOWN"
+  local lavenderGround = tileset.id == "OVERWORLD" and mapId == "LAVENDER_TOWN"
   local fuchsiaGround = legendaryCityGround and mapId == "FUCHSIA_CITY"
-  -- Lavender's north edge is the connected Route 10 body. When CITY GROUND
-  -- selects the Pallet-light Lavender lawn, carry that same grass donor into
-  -- Route 10's ordinary turf so the loaded neighbour cannot reintroduce a
-  -- darker strip at the map seam.
-  local lavenderRouteGrass = tileset.id == "OVERWORLD"
-    and mapId == "ROUTE_10" and CommunityVisuals.customCityGround()
-  local customGrass = CommunityVisuals.customGrass() and not cityGroundMap
-  local grassReplacement = customGrass or fuchsiaGround or lavenderRouteGrass
+  local lavenderRoute10 = tileset.id == "OVERWORLD" and mapId == "ROUTE_10"
+  -- Route 10's ordinary grass must retain the same sparse source donor as the
+  -- Lavender seam even when the broad GRASS row is set to LEGENDARY.
+  local customGrass = CommunityVisuals.customGrass()
+    and not cityGroundMap and not lavenderRoute10
+  local grassReplacement = customGrass or fuchsiaGround
   local towerInterior = tileset.id == "CEMETERY"
     and mapId:match("^POKEMON_TOWER_[1-7]F$") ~= nil
     and CommunityVisuals.customTower()
@@ -881,6 +880,16 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   local def = map.def
   local tw, th = def.width * 4, def.height * 4         -- map size in tiles
   local r = bodyOnly and 0 or RING * 4
+
+  -- Pokemon Tower's upper twelve 8px rows are authored at the very south end
+  -- of Route 10 (see voxel_heights pokemon_tower_top at y=132 on the 144-row
+  -- route). That is exactly the neighbour strip visible from Lavender. Keep
+  -- the correction local to those final twelve rows so the rest of Route 10
+  -- retains its actual roads/bridges/terrain.
+  local function lavenderLawnAt(tx, ty)
+    if lavenderGround then return true end
+    return lavenderRoute10 and ty >= th - 12
+  end
 
   -- TEST402 Kanto bedrock. TerrainAtlas writes these four warm-stone
   -- swatches into the first row of every authored ledge tile.  Sampling
@@ -2485,12 +2494,11 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
                             1, g, g == 34 and "healing" or false)
           elseif caveKind then
             caveNaturalTop(tx, ty, tx * 8, ty * 8, 0, 1, caveKind)
-          elseif lavenderGround then
-            -- Do not key this on the synthesized floor tile: Tower/sign/
-            -- building claims can inherit another donor and used to leave
-            -- isolated bald or grey squares in the otherwise continuous lawn.
-            kantoGrassTop(tx, ty, tx * 8, ty * 8, 0,
-                          aoShades(tx, ty, 0, 1))
+          elseif lavenderLawnAt(tx, ty) then
+            -- Exact Pallet/Battle-Art lawn donor. Do not key this on the
+            -- synthesized floor tile: Tower/sign/building claims can inherit
+            -- another donor and otherwise leave isolated bald/grey squares.
+            topQuad(tx * 8, ty * 8, 0, KANTO_GRASS_TILE, 1)
           elseif isKantoCourtyardAt(tx, ty, g) then
             kantoCourtyardTop(tx, ty, tx * 8, ty * 8, 0,
                              aoShades(tx, ty, 0, 1))
@@ -2660,12 +2668,11 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           elseif viridianForest and s.class == "ground" then
             forestGroundTop(tx, ty, x0, z0, h, topTile,
                             s.art == "upright" and VOLUME_TOP_SHADE or 1)
-          elseif lavenderGround and s.class == "ground" then
-            -- CITY GROUND deliberately makes all flat Lavender floor donors
-            -- one Pallet-light grass family. Source map data and collision stay
-            -- untouched; only the rendered top material is unified.
-            kantoGrassTop(tx, ty, x0, z0, h,
-                          aoShades(tx, ty, h, 1))
+          elseif lavenderLawnAt(tx, ty) and s.class == "ground" then
+            -- Reuse Pallet Town's normal $2C source tile directly. This is not
+            -- Legendary GRASS_ART: the sparse authored dash pattern and normal
+            -- map palette remain intact, while checker/path donors disappear.
+            topQuad(x0, z0, h, KANTO_GRASS_TILE, 1)
           elseif isKantoCourtyardAt(tx, ty) and s.flat then
             kantoCourtyardTop(tx, ty, x0, z0, h,
                              aoShades(tx, ty, h, 1))

@@ -526,11 +526,16 @@ function Disk.fingerprint(map, slot, masks, kind)
       parts[#parts + 1] = tostring(sign.text)
     end
   end
+  local mapId = tostring(map.id or ""):upper()
   local cityGroundMap = CommunityVisuals.isCityGroundMap(map)
   -- CITY GROUND fully owns Lavender/Fuchsia turf. The broad GRASS row is not
   -- a geometry/material input there, so do not create redundant city cache
-  -- variants when a player changes route grass independently.
-  if not cityGroundMap then parts[#parts + 1] = CommunityVisuals.grass:get() end
+  -- variants when a player changes route grass independently. Route 10 is the
+  -- same exception because its sparse source lawn is fixed for the Lavender
+  -- boundary even when global GRASS is Legendary.
+  if not cityGroundMap and mapId ~= "ROUTE_10" then
+    parts[#parts + 1] = CommunityVisuals.grass:get()
+  end
   if kind == "aux" then
     -- TEST138 removes only exposed east tile-boundary caps while preserving
     -- every camera-safe interior cap and crossed centre card. Force a clean
@@ -539,23 +544,21 @@ function Disk.fingerprint(map, slot, masks, kind)
     parts[#parts + 1] = "closed-tall-grass-v5-east-edge-softened"
   end
   parts[#parts + 1] = CommunityVisuals.roads:get()
-  local mapId = tostring(map.id or ""):upper()
   if cityGroundMap then
-    -- Issue #54: city ground has its own option and therefore its own cache
-    -- identity. The contract token invalidates pre-option meshes, where
-    -- Lavender was unconditional and Fuchsia followed the global GRASS row.
-    parts[#parts + 1] = "city-ground-option-v1"
-    parts[#parts + 1] = CommunityVisuals.cityGround:get()
-    if mapId == "LAVENDER_TOWN" and CommunityVisuals.customCityGround() then
-      parts[#parts + 1] = "lavender-pallet-light-grass-v1"
+    parts[#parts + 1] = "city-ground-option-v2"
+    if mapId == "LAVENDER_TOWN" then
+      -- Both CITY GROUND choices intentionally resolve to the same sparse
+      -- Pallet/Battle-Art $2C lawn. The fixed token invalidates the worker
+      -- build that used dense Legendary grass only in LEGENDARY mode.
+      parts[#parts + 1] = "lavender-pallet-source-lawn-v2"
+    else
+      parts[#parts + 1] = CommunityVisuals.cityGround:get()
     end
   end
-  -- Route 10 is Lavender's loaded north neighbour. Its ordinary grass follows
-  -- CITY GROUND only to keep that boundary continuous, so include the city
-  -- choice in this map's persistent mesh identity as well.
+  -- Route 10's final twelve tile rows are Lavender's loaded north neighbour.
+  -- Their material is fixed, not a CITY GROUND setting dependency.
   if mapId == "ROUTE_10" then
-    parts[#parts + 1] = "lavender-route10-light-grass-v1"
-    parts[#parts + 1] = CommunityVisuals.cityGround:get()
+    parts[#parts + 1] = "lavender-route10-source-lawn-strip-v2"
   end
   if mapId:match("^POKEMON_TOWER_[1-7]F$") then
     parts[#parts + 1] = "pokemon-tower-stone-v14-master-wall-blue-void"
