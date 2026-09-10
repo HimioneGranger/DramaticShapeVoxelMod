@@ -459,13 +459,6 @@ local GRASS_ART = {
   "BBSSBBLB", "BSLLSBBB", "SSBLLBBS", "BLBSSSBB",
   "BBSSBLBB", "SBBLSSLB", "BLSBBBSS", "SSBBLSBB",
 }
--- Lavender Legendary ground is intentionally quiet: a mostly continuous
--- smoky body with sparse charcoal/mauve flecks. ChunkMesher rotates this donor
--- and adds low-frequency world-space shading so the 8px source grid disappears.
-local LAVENDER_GROUND_ART = {
-  "BBBBBBBB", "BBBBBSBB", "BBBBBBBB", "BBLBBBBB",
-  "BBBBBBBB", "BBBBBBBB", "BBBBDBBB", "BBBBBBBB",
-}
 -- TEST115 Pokemon Tower. ChunkMesher now supplies continuous world-space
 -- granite, so this donor is deliberately quiet and cannot announce the 8px
 -- source grid if a fallback face ever samples the whole tile.
@@ -578,10 +571,6 @@ local GRASS = {
 local ROUTE10_GRASS = {
   dark={.23,.46,.13,1}, shadow={.30,.57,.18,1},
   body={.38,.68,.24,1}, light={.47,.77,.32,1},
-}
-local LAVENDER_GROUND = {
-  dark={.185,.180,.240,1}, shadow={.275,.265,.335,1},
-  body={.390,.375,.455,1}, light={.505,.490,.565,1},
 }
 local LAVENDER_PATH = {
   dark={.300,.305,.385,1}, shadow={.395,.400,.480,1},
@@ -712,10 +701,10 @@ local function applyLavenderCommunityMaterials(paint, legendary)
     return
   end
   -- Preserve Lavender's source path network instead of collapsing the entire
-  -- town to one material. $23/$39 become a misty lavender-grey road; $2C is
-  -- the quieter surrounding earth donor.
+  -- town to one material. $23/$39 remain a misty lavender-grey road while
+  -- surrounding ground uses the same vivid green family as Route 10.
   paint(35, PATH_ART, LAVENDER_PATH)
-  paint(44, LAVENDER_GROUND_ART, LAVENDER_GROUND)
+  paint(44, GRASS_ART, ROUTE10_GRASS)
   paint(57, PATH_ART, LAVENDER_PATH)
 end
 

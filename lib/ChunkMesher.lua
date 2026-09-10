@@ -875,6 +875,17 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   local tw, th = def.width * 4, def.height * 4         -- map size in tiles
   local r = bodyOnly and 0 or RING * 4
 
+  -- The southern Route 10 approach is the eleven block rows from Rock
+  -- Tunnel's lower mouth to Lavender Town. Keep the boundary authored by the
+  -- map itself instead of baking viewport coordinates into the renderer:
+  -- Route 10 is 36 block rows tall and its final 11 rows are this approach.
+  -- This remains a GRASS-owned route, not a CITY GROUND map.
+  local ROUTE10_LAVENDER_APPROACH_ROWS = 11 * 4
+  local function route10LavenderApproachAt(ty)
+    return tileset.id == "OVERWORLD" and mapId == "ROUTE_10"
+      and ty >= th - ROUTE10_LAVENDER_APPROACH_ROWS and ty < th
+  end
+
   -- TEST402 Kanto bedrock. TerrainAtlas writes these four warm-stone
   -- swatches into the first row of every authored ledge tile.  Sampling
   -- those texels keeps the replacement inside the existing terrain atlas:
@@ -1720,33 +1731,6 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
          shadeTimes(aoShades(tx, ty, h, shade), broad))
   end
 
-  local function lavenderGroundShades(x0, z0, shade)
-    local corners = {
-      { x0, z0 }, { x0 + 8, z0 },
-      { x0 + 8, z0 + 8 }, { x0, z0 + 8 },
-    }
-    local out = {}
-    for i, corner in ipairs(corners) do
-      local base = type(shade) == "table" and shade[i] or shade
-      -- Broad fields cross source-tile boundaries so the Legendary treatment
-      -- reads as one weathered lavender/charcoal town surface rather than an
-      -- 8px checkerboard. The atlas provides only sparse stone/earth flecks.
-      local broad = smoothPathNoise(corner[1] * 0.70, corner[2] * 0.70, 1111)
-      local drift = smoothPathNoise(corner[1] * 0.36, corner[2] * 0.36, 1117)
-      out[i] = base * (0.955 + broad * 0.055 + drift * 0.025)
-    end
-    return out
-  end
-
-  local function lavenderGroundTop(tx, ty, x0, z0, h, shade)
-    local x1, z1 = x0 + 8, z0 + 8
-    local variant = math.floor(rockNoise(tx, ty, 1111) * 4)
-    push({ { x0, h, z0 }, { x1, h, z0 },
-           { x1, h, z1 }, { x0, h, z1 } },
-         pavedUV(KANTO_GRASS_TILE, variant),
-         lavenderGroundShades(x0, z0, shade))
-  end
-
   local function woodRect(axis, across0, across1, along0, along1, y)
     if axis == "z" then
       return { { across0, y, along0 }, { across1, y, along0 },
@@ -2530,14 +2514,28 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
               kantoPavedTop(tx, ty, tx * 8, ty * 8, 0,
                             aoShades(tx, ty, 0, 1))
             elseif lavenderLegendaryGround then
-              lavenderGroundTop(tx, ty, tx * 8, ty * 8, 0,
-                                aoShades(tx, ty, 0, 1))
+              -- Legendary Lavender uses the same vivid lawn geometry as the
+              -- approved bright Route 10 grass instead of mauve city earth.
+              kantoGrassTop(tx, ty, tx * 8, ty * 8, 0,
+                            aoShades(tx, ty, 0, 1))
             else
               lavenderBattleGroundTop(tx, ty, tx * 8, ty * 8, 0, 1)
             end
           elseif isKantoCourtyardAt(tx, ty, g) then
             kantoCourtyardTop(tx, ty, tx * 8, ty * 8, 0,
                              aoShades(tx, ty, 0, 1))
+          elseif route10LavenderApproachAt(ty)
+              and not (CommunityVisuals.customRoads() and KANTO_PATH_TILE[g]) then
+            -- From Rock Tunnel to the Lavender seam, Battle Art is one sandy
+            -- field regardless of which flat donor the source block used.
+            -- Legendary GRASS turns the exact same coverage vivid green.
+            if customGrass then
+              kantoGrassTop(tx, ty, tx * 8, ty * 8, 0,
+                            aoShades(tx, ty, 0, 1))
+            else
+              kantoPavedTop(tx, ty, tx * 8, ty * 8, 0,
+                            aoShades(tx, ty, 0, 1))
+            end
           elseif CommunityVisuals.customRoads() and KANTO_PATH_TILE[g] then
             local finish, finishAxis = claimedPathFinishAt(tx, ty)
             if finish == "wood" then
@@ -2711,8 +2709,8 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
               -- roads; the source $23/$39 cells retain their exact topology.
               kantoPavedTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))
             elseif lavenderLegendaryGround then
-              lavenderGroundTop(tx, ty, x0, z0, h,
-                                aoShades(tx, ty, h, 1))
+              kantoGrassTop(tx, ty, x0, z0, h,
+                            aoShades(tx, ty, h, 1))
             else
               lavenderBattleGroundTop(tx, ty, x0, z0, h, 1)
             end
@@ -2728,6 +2726,12 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
             kantoPavedTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))
           elseif paved == "wood" then
             kantoWoodTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))
+          elseif route10LavenderApproachAt(ty) and s.class == "ground" then
+            if customGrass then
+              kantoGrassTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))
+            else
+              kantoPavedTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))
+            end
           elseif grassReplacement and tileset.id == "OVERWORLD"
                  and s.class == "ground" and topTile == KANTO_GRASS_TILE then
             kantoGrassTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))

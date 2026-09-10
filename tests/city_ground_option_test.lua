@@ -158,8 +158,8 @@ check(lavenderN == lavenderBattlePath35N and not same(lavenderBattle, lavenderBa
 local lavenderLegendaryPath35, lavenderLegendaryPath35N = signature('LAVENDER_TOWN', true, false, 35)
 local lavenderLegendaryPath57, lavenderLegendaryPath57N = signature('LAVENDER_TOWN', true, false, 57)
 check(lavenderLegendaryN == lavenderN and not same(lavenderLegendary, lavenderBattle)
-    and not same(lavenderLegendary, palletGrass),
-  'Lavender CITY GROUND Legendary is a distinct lighter haunted ground treatment')
+    and same(lavenderLegendary, palletGrass),
+  'Lavender CITY GROUND Legendary uses the shared natural turf geometry')
 check(lavenderLegendaryPath35N == lavenderLegendaryPath57N
     and same(lavenderLegendaryPath35, lavenderLegendaryPath57),
   'Lavender Legendary preserves the $23/$39 authored path network as one material')
@@ -188,14 +188,25 @@ check(claimedLavenderLegendaryGroundN == lavenderLegendaryN
     and same(claimedLavenderLegendaryPath, lavenderLegendaryPath35),
   'Lavender Legendary synthesized floors preserve ground versus path membership')
 
-local route10South, route10SouthN = signature('ROUTE_10', false, false, 90, false, 143, 36)
-local route10InteriorSame, route10InteriorSameN = signature('ROUTE_10', false, false, 90, false, 100, 36)
-check(route10SouthN == route10InteriorSameN and same(route10South, route10InteriorSame),
-  'Route 10 south edge is no longer repainted by Lavender CITY GROUND')
-local route10InteriorGrass = signature('ROUTE_10', false, true, 44, false, 100, 36)
-local route10InteriorBattle = signature('ROUTE_10', false, false, 44, false, 100, 36)
-check(not same(route10InteriorGrass, route10InteriorBattle),
-  'Route 10 interior grass remains controlled by the broad GRASS setting')
+local route10NorthGround, route10NorthGroundN = signature('ROUTE_10', false, false, 90, false, 99, 36)
+local route10BattleApproach, route10BattleApproachN = signature('ROUTE_10', false, false, 90, false, 100, 36)
+local route10BattleApproachPath, route10BattleApproachPathN = signature('ROUTE_10', false, false, 57, false, 100, 36)
+check(route10NorthGroundN == route10BattleApproachN
+    and not same(route10NorthGround, route10BattleApproach),
+  'Battle Art starts the cave-to-Lavender sand field at Route 10 block row 25')
+check(route10BattleApproachN == route10BattleApproachPathN
+    and same(route10BattleApproach, route10BattleApproachPath),
+  'Battle Art Route 10 approach replaces alternate flat donors with the same sandy material')
+local route10LegendaryApproach, route10LegendaryApproachN = signature('ROUTE_10', false, true, 90, false, 100, 36)
+local route10LegendaryGrass, route10LegendaryGrassN = signature('ROUTE_10', false, true, 44, false, 100, 36)
+check(route10LegendaryApproachN == route10LegendaryGrassN
+    and same(route10LegendaryApproach, route10LegendaryGrass)
+    and not same(route10LegendaryApproach, route10BattleApproach),
+  'Legendary GRASS makes every Route 10 approach ground donor the same bright lawn')
+local route10CityToggle, route10CityToggleN = signature('ROUTE_10', true, false, 90, false, 100, 36)
+check(route10CityToggleN == route10BattleApproachN
+    and same(route10CityToggle, route10BattleApproach),
+  'Route 10 approach remains independent of the CITY GROUND setting')
 
 local Disk = assert(loadfile('lib/VoxelMeshDisk.lua'))({
   require = function(name)
@@ -235,6 +246,11 @@ check(route10Cache == fingerprint('ROUTE_10', true, false),
   'Route 10 is not a CITY GROUND cache dependency')
 check(route10Cache ~= fingerprint('ROUTE_10', false, true),
   'Route 10 interior terrain remains a global GRASS cache dependency')
+check(route10Cache:find('route10-lavender-approach-v1', 1, true) ~= nil,
+  'Route 10 body cache fingerprints the new cave-to-Lavender coverage')
+local route10Aux = Disk.fingerprint(cacheMap('ROUTE_10'), 'aux', nil, 'aux')
+check(route10Aux:find('route10-tower-flowerbed-v1', 1, true) ~= nil,
+  'Route 10 auxiliary cache fingerprints the Legendary Tower flowerbed geometry')
 local palletCache = fingerprint('PALLET_TOWN', false, false)
 check(palletCache == fingerprint('PALLET_TOWN', true, false),
   'CITY GROUND does not invalidate unrelated Overworld maps')
@@ -346,6 +362,11 @@ local ordinaryGrass = material('ROUTE_1', false, true)
 local _, bright = routeGrass:getPixel(12 * 8, 2 * 8)
 local _, ordinary = ordinaryGrass:getPixel(12 * 8, 2 * 8)
 check(bright > ordinary, 'Route 10 grass is visibly brighter without changing other routes')
+local lavenderGrass = material('LAVENDER_TOWN', true, false)
+local lr, lg, lb = lavenderGrass:getPixel(12 * 8, 2 * 8)
+local rr10, rg10, rb10 = routeGrass:getPixel(12 * 8, 2 * 8)
+check(lr == rr10 and lg == rg10 and lb == rb10,
+  'Legendary Lavender lawn uses the exact same bright-green palette as Route 10')
 check(routeGrass ~= ordinaryGrass, 'Route 10 static atlas cannot leak its palette into ordinary routes')
 local route10Animated = TerrainAtlas.animate(animatedMap('ROUTE_10'), nil, {}, false)
 check(route10Animated ~= routeShared, 'Route 10 animated atlas is isolated from other routes')

@@ -1210,6 +1210,7 @@ function Structures.forMap(map)
 
     -- ---- flowers: the animated meadow tile stands as a 1px cutout ----
     Structures.buildFlowers(S, map, tw, th, x0, x1, y0, y1, data)
+    Structures.buildLavenderFlowerbed(S, map, data)
   end
 
   -- ---- authored ground under pinned props ----
@@ -4445,6 +4446,7 @@ end
 -- like the ground under a detected prop: the tile's own slot no longer
 -- holds art anyone can draw flat.
 local FLOWER_THICK = 1
+local OVERWORLD_FLOWER_TILE = 3
 
 local function flowerFrames(tileset, tileId)
   local out = {}
@@ -4625,6 +4627,50 @@ function Structures.buildFlowers(S, map, tw, th, x0, x1, y0, y1, data)
       end
     end
   end
+end
+
+-- Legendary landscaping for the blocked rectangle behind Pokemon Tower.
+-- Buildings records the exact `pokemon_tower_top` match, so this follows the
+-- authored seam footprint if the map ever moves rather than depending on a
+-- camera screenshot coordinate. The flowers are presentation-only standees:
+-- they do not claim cells, alter collision, rewrite source tiles, or change
+-- encounter data. Route 10 remains controlled by the broad GRASS option.
+function Structures.buildLavenderFlowerbed(S, map, data)
+  if not (S and S.lavenderFlowerbed and data) then return 0 end
+  if tostring(map.id or ""):upper() ~= "ROUTE_10" then return 0 end
+  if not CommunityVisuals.customGrass() then return 0 end
+
+  local bed = S.lavenderFlowerbed
+  local tpl = flowerTemplate(map, data, OVERWORLD_FLOWER_TILE)
+  if not tpl or #tpl == 0 then return 0 end
+
+  local quads = S.flowerQuads
+  local emitted = 0
+  for ty = bed.minY, bed.maxY do
+    for tx = bed.minX, bed.maxX do
+      -- Every second 8px source tile gives a dense but readable flowerbed.
+      -- Still verify the engine's collision cell: the user explicitly wants
+      -- flowers inside the unwalkable rectangle, never on the walking lane.
+      local blocked = true
+      if type(map.isWalkableCell) == "function" then
+        blocked = not map:isWalkableCell(math.floor(tx / 2), math.floor(ty / 2))
+      end
+      if blocked and (tx + ty) % 2 == 0 then
+        local wx, wz = tx * 8, ty * 8
+        for _, q in ipairs(tpl) do
+          quads[#quads + 1] = {
+            { q[1][1] + wx, q[1][2], q[1][3] + wz },
+            { q[2][1] + wx, q[2][2], q[2][3] + wz },
+            { q[3][1] + wx, q[3][2], q[3][3] + wz },
+            { q[4][1] + wx, q[4][2], q[4][3] + wz },
+            uv = q.uv, shade = q.shade,
+          }
+          emitted = emitted + 1
+        end
+      end
+    end
+  end
+  return emitted
 end
 
 -- Drop one map's analysis (Cut changed the block layer) or everything.

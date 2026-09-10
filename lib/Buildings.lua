@@ -1538,6 +1538,19 @@ function Buildings.stamp(S, map, quads, tx, ty, bw, bh, t)
     for _, id in ipairs(t.keep) do keep[id] = true end
   end
 
+  -- The upper half of Pokemon Tower is a claim-only rectangle on Route 10:
+  -- its art is composited into the full tower model stamped from Lavender.
+  -- Retain that matched footprint as presentation metadata so Legendary can
+  -- landscape exactly the authored blocked rectangle instead of guessing
+  -- screen/world coordinates. Collision and source tiles remain untouched.
+  if t and t.id == "pokemon_tower_top"
+      and tostring(map.id or ""):upper() == "ROUTE_10" then
+    S.lavenderFlowerbed = {
+      minX = tx, maxX = tx + bw - 1,
+      minY = ty, maxY = ty + bh - 1,
+    }
+  end
+
   -- the ground the building stands on: the commonest flat tile around its
   -- feet, so a house on a path keeps its path
   local votes, best, bestN = {}, nil, 0

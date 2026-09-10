@@ -540,12 +540,20 @@ function Disk.fingerprint(map, slot, masks, kind)
     -- reused from disk.
     parts[#parts + 1] = "closed-tall-grass-v5-east-edge-softened"
   end
+  if mapId == "ROUTE_10" then
+    -- The final eleven block rows now share one cave-to-Lavender material
+    -- treatment, and AUX can contain the Legendary Tower flowerbed.
+    parts[#parts + 1] = "route10-lavender-approach-v1"
+    if kind == "aux" then
+      parts[#parts + 1] = "route10-tower-flowerbed-v1"
+    end
+  end
   parts[#parts + 1] = CommunityVisuals.roads:get()
   if cityGroundMap then
     parts[#parts + 1] = "city-ground-option-v4"
     parts[#parts + 1] = CommunityVisuals.cityGround:get()
     if mapId == "LAVENDER_TOWN" then
-      parts[#parts + 1] = "lavender-authored-path-network-v3"
+      parts[#parts + 1] = "lavender-bright-lawn-v4"
     end
   end
   if mapId:match("^POKEMON_TOWER_[1-7]F$") then

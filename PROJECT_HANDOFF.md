@@ -1,17 +1,33 @@
-# Lavender atlas donor correction and Route 10 palette - 2026-09-10
+# Lavender approach ground + Tower flowerbed - 2026-09-10
 
-Battle Art Lavender now paints its sandy $23/$39 atlas donors even when
-ROADS is disabled. The mesher already sampled $39 unconditionally, but the
-atlas previously retained the source city palette in that setting combination.
-Legendary Route 10 has brighter flat/tall grass with map-isolated static and
-animated atlases; other routes and Fuchsia keep their existing palettes.
-Lavender's disk fingerprint advances to authored-path-network-v3.
+The previously pending screenshot request is now implemented. On ROUTE_10 the
+final eleven authored block rows (tile rows 100..143, Rock Tunnel's lower mouth
+through the Lavender seam) are one continuous ground treatment: BATTLE ART
+routes every flat ground donor through the existing sandy Kanto-road material,
+while LEGENDARY GRASS routes the same coverage through the approved bright
+Route 10 lawn. ROADS & BRIDGES can still retain its authored path material when
+enabled, and CITY GROUND still has no ownership over Route 10.
 
-The focused suite now checks real mocked atlas pixels as well as geometry:
-40 checks pass, and all 114 production Lua files compile under LuaJIT 2.1.
-These are headless checks, not in-game visual validation. The full cave-mouth
-to town ground coverage and flower placement behind Pokemon Tower remain
-pending; this change does not claim to implement those geometry requests.
+Lavender CITY GROUND LEGENDARY now uses that same bright-green lawn palette for
+non-path town ground while preserving the authored $23/$39 path network.
+Fuchsia is unchanged. BATTLE ART Lavender still paints its sandy $23/$39 atlas
+donors even when ROADS is disabled and keeps the slightly darker sandy town
+ground treatment already approved by the preceding path-network change.
+
+The flowerbed does not use guessed camera coordinates. `pokemon_tower_top` is
+already the claim-only 12x8 tile rectangle on Route 10 that contains the upper
+half of Pokemon Tower's source drawing; Buildings now records that exact matched
+footprint. LEGENDARY GRASS adds animated flower standees on a checkerboard of
+the unwalkable cells inside it. BATTLE ART adds none. No source map tile,
+collision, warp, encounter or walkability data is changed.
+
+Persistent cache identities advance with `route10-lavender-approach-v1`,
+`route10-tower-flowerbed-v1` (AUX), and `lavender-bright-lawn-v4`. Static and
+animated atlas map isolation remains unchanged. Headless validation: CITY
+GROUND/Route 10 suite 45 checks, dedicated Lavender approach/flowerbed suite
+150 checks, grass east-edge 15 checks, build-budget 35 checks, and voxel-storage
+6 checks. All 114 production Lua files compile under Lupa's LuaJIT 2.1 backend.
+Actual in-engine visual comparison is still required before release.
 
 # LuaJIT TerrainAtlas compile-limit fix - 2026-09-10
 
