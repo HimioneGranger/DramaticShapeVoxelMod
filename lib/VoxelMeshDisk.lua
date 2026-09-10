@@ -547,8 +547,15 @@ function Disk.fingerprint(map, slot, masks, kind)
     parts[#parts + 1] = "city-ground-option-v1"
     parts[#parts + 1] = CommunityVisuals.cityGround:get()
     if mapId == "LAVENDER_TOWN" and CommunityVisuals.customCityGround() then
-      parts[#parts + 1] = "lavender-charcoal-purple-ground-v2"
+      parts[#parts + 1] = "lavender-pallet-light-grass-v1"
     end
+  end
+  -- Route 10 is Lavender's loaded north neighbour. Its ordinary grass follows
+  -- CITY GROUND only to keep that boundary continuous, so include the city
+  -- choice in this map's persistent mesh identity as well.
+  if mapId == "ROUTE_10" then
+    parts[#parts + 1] = "lavender-route10-light-grass-v1"
+    parts[#parts + 1] = CommunityVisuals.cityGround:get()
   end
   if mapId:match("^POKEMON_TOWER_[1-7]F$") then
     parts[#parts + 1] = "pokemon-tower-stone-v14-master-wall-blue-void"

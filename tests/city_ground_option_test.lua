@@ -86,13 +86,18 @@ local C = assert(loadfile('lib/ChunkMesher.lua'))({
 })
 
 local function key(x, z) return (z + 64) * 4096 + x + 64 end
-local function fixture(id)
+local function fixture(id, tile, claimed)
+  tile = tile or 44
   analysis = {
     shapeAt = {}, tileAt = {}, runs = {}, skip = {}, ground = {}, doorFold = {},
     objectQuads = {}, roundStamps = {},
   }
   analysis.shapeAt[key(1, 1)] = { h = 0, class = 'ground', art = 'top', flat = true }
-  analysis.tileAt[key(1, 1)] = 44
+  analysis.tileAt[key(1, 1)] = tile
+  if claimed then
+    analysis.skip[key(1, 1)] = true
+    analysis.ground[key(1, 1)] = tile
+  end
   return {
     id = id,
     def = { width = 1, height = 1 },
@@ -101,10 +106,10 @@ local function fixture(id)
   }
 end
 
-local function signature(id, city, grass)
+local function signature(id, city, grass, tile, claimed)
   Community.cityGround.value = city and 'n64memory' or 'default'
   Community.grass.value = grass and 'n64memory' or 'default'
-  local vertices = C.geometry(fixture(id), true)
+  local vertices = C.geometry(fixture(id, tile, claimed), true)
   local out = {}
   for _, vertex in ipairs(vertices) do
     -- Geometry positions/topology must stay fixed; only UV/material shading is
@@ -129,13 +134,26 @@ local lavenderGlobalGrass, lavenderGlobalN = signature('LAVENDER_TOWN', false, t
 local lavenderLegendary, lavenderLegendaryN = signature('LAVENDER_TOWN', true, false)
 check(lavenderN == lavenderGlobalN and same(lavenderBattle, lavenderGlobalGrass),
   'Lavender Battle Art ground ignores the broad Legendary GRASS row')
-check(lavenderLegendaryN == lavenderN and not same(lavenderBattle, lavenderLegendary),
-  'Lavender CITY GROUND Legendary retains its authored Legendary treatment')
 
 local palletBattle, palletN = signature('PALLET_TOWN', false, false)
 local palletGrass, palletGrassN = signature('PALLET_TOWN', false, true)
 check(palletN == palletGrassN and not same(palletBattle, palletGrass),
   'GRASS still controls ordinary Overworld turf outside the two city maps')
+check(lavenderLegendaryN == palletGrassN and same(lavenderLegendary, palletGrass),
+  'Lavender CITY GROUND Legendary uses the exact Pallet light-grass top')
+for _, tile in ipairs({35, 57, 90}) do
+  local variant, n = signature('LAVENDER_TOWN', true, false, tile)
+  check(n == lavenderLegendaryN and same(variant, lavenderLegendary),
+    'Lavender flat source tile '..tile..' cannot fall back to checker/grey ground')
+end
+local claimedLavender, claimedLavenderN = signature('LAVENDER_TOWN', true, false, 90, true)
+check(claimedLavenderN == lavenderLegendaryN and same(claimedLavender, lavenderLegendary),
+  'Lavender synthesized ground under a claimed prop/building uses Pallet light grass')
+local route10Battle = signature('ROUTE_10', false, false)
+local route10CityGrass, route10CityGrassN = signature('ROUTE_10', true, false)
+check(route10CityGrassN == palletGrassN and same(route10CityGrass, palletGrass)
+    and not same(route10Battle, route10CityGrass),
+  'Route 10 grass follows Lavender CITY GROUND at the north seam')
 
 local Disk = assert(loadfile('lib/VoxelMeshDisk.lua'))({
   require = function(name)
@@ -170,6 +188,9 @@ check(lavenderCache == fingerprint('LAVENDER_TOWN', false, true),
   'Lavender cache identity ignores unrelated GRASS changes')
 check(lavenderCache ~= fingerprint('LAVENDER_TOWN', true, false),
   'Lavender CITY GROUND choice owns its persistent mesh identity')
+local route10Cache = fingerprint('ROUTE_10', false, false)
+check(route10Cache ~= fingerprint('ROUTE_10', true, false),
+  'Route 10 cache identity follows CITY GROUND for the Lavender seam')
 local palletCache = fingerprint('PALLET_TOWN', false, false)
 check(palletCache == fingerprint('PALLET_TOWN', true, false),
   'CITY GROUND does not invalidate unrelated Overworld maps')
@@ -227,5 +248,13 @@ local routeAnimated = TerrainAtlas.animate(animatedMap('ROUTE_1'), nil, {}, fals
 local routeShared = TerrainAtlas.animate(animatedMap('ROUTE_2'), nil, {}, false)
 check(routeAnimated == routeShared and built == 3,
   'ordinary OVERWORLD maps retain the bounded shared animated cache')
+Community.cityGround.value = 'n64memory'
+local route10Animated = TerrainAtlas.animate(animatedMap('ROUTE_10'), nil, {}, false)
+local route1CityGround = TerrainAtlas.animate(animatedMap('ROUTE_1'), nil, {}, false)
+local route2CityGround = TerrainAtlas.animate(animatedMap('ROUTE_2'), nil, {}, false)
+check(route10Animated and route10Animated.id == 'ROUTE_10'
+    and route1CityGround == route2CityGround and route10Animated ~= route1CityGround
+    and built == 5,
+  'Route 10 animated atlas is isolated only while it follows Lavender CITY GROUND')
 
 print(checks .. ' checks passed (city ground option)')

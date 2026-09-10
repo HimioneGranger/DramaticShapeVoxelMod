@@ -572,8 +572,14 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   local legendaryCityGround = cityGroundMap and CommunityVisuals.customCityGround()
   local lavenderGround = legendaryCityGround and mapId == "LAVENDER_TOWN"
   local fuchsiaGround = legendaryCityGround and mapId == "FUCHSIA_CITY"
+  -- Lavender's north edge is the connected Route 10 body. When CITY GROUND
+  -- selects the Pallet-light Lavender lawn, carry that same grass donor into
+  -- Route 10's ordinary turf so the loaded neighbour cannot reintroduce a
+  -- darker strip at the map seam.
+  local lavenderRouteGrass = tileset.id == "OVERWORLD"
+    and mapId == "ROUTE_10" and CommunityVisuals.customCityGround()
   local customGrass = CommunityVisuals.customGrass() and not cityGroundMap
-  local grassReplacement = customGrass or fuchsiaGround
+  local grassReplacement = customGrass or fuchsiaGround or lavenderRouteGrass
   local towerInterior = tileset.id == "CEMETERY"
     and mapId:match("^POKEMON_TOWER_[1-7]F$") ~= nil
     and CommunityVisuals.customTower()
@@ -1703,39 +1709,6 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
          grassShades(x0, z0, shade))
   end
 
-  local function isLavenderGroundTile(tile)
-    return tile == KANTO_GRASS_TILE or KANTO_PATH_TILE[tile] == true
-  end
-
-  local function lavenderGroundShades(x0, z0, shade)
-    local corners = {
-      { x0, z0 }, { x0 + 8, z0 },
-      { x0 + 8, z0 + 8 }, { x0, z0 + 8 },
-    }
-    local out = {}
-    for i, corner in ipairs(corners) do
-      local base = type(shade) == "table" and shade[i] or shade
-      -- Two slow fields cross source-tile boundaries, so variation reads as
-      -- worn earth instead of revealing the original eight-pixel grid.
-      local broad = smoothPathNoise(corner[1] * 0.70, corner[2] * 0.70, 1111)
-      local drift = smoothPathNoise(corner[1] * 0.36, corner[2] * 0.36, 1117)
-      out[i] = base * (0.955 + broad * 0.055 + drift * 0.025)
-    end
-    return out
-  end
-
-  -- TEST111: Lavender's authored path/turf alternation is retained in map
-  -- data but presented as one continuous, low-contrast earth plane. One
-  -- quad per cell preserves the existing collision and draw-call profile.
-  local function lavenderGroundTop(tx, ty, x0, z0, h, shade)
-    local x1, z1 = x0 + 8, z0 + 8
-    local variant = math.floor(rockNoise(tx, ty, 1111) * 4)
-    push({ { x0, h, z0 }, { x1, h, z0 },
-           { x1, h, z1 }, { x0, h, z1 } },
-         pavedUV(KANTO_PATH_SWATCH_TILE, variant),
-         lavenderGroundShades(x0, z0, shade))
-  end
-
   local function woodRect(axis, across0, across1, along0, along1, y)
     if axis == "z" then
       return { { across0, y, along0 }, { across1, y, along0 },
@@ -2512,12 +2485,15 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
                             1, g, g == 34 and "healing" or false)
           elseif caveKind then
             caveNaturalTop(tx, ty, tx * 8, ty * 8, 0, 1, caveKind)
+          elseif lavenderGround then
+            -- Do not key this on the synthesized floor tile: Tower/sign/
+            -- building claims can inherit another donor and used to leave
+            -- isolated bald or grey squares in the otherwise continuous lawn.
+            kantoGrassTop(tx, ty, tx * 8, ty * 8, 0,
+                          aoShades(tx, ty, 0, 1))
           elseif isKantoCourtyardAt(tx, ty, g) then
             kantoCourtyardTop(tx, ty, tx * 8, ty * 8, 0,
                              aoShades(tx, ty, 0, 1))
-          elseif lavenderGround and isLavenderGroundTile(g) then
-            lavenderGroundTop(tx, ty, tx * 8, ty * 8, 0,
-                              aoShades(tx, ty, 0, 1))
           elseif CommunityVisuals.customRoads() and KANTO_PATH_TILE[g] then
             local finish, finishAxis = claimedPathFinishAt(tx, ty)
             if finish == "wood" then
@@ -2684,14 +2660,15 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           elseif viridianForest and s.class == "ground" then
             forestGroundTop(tx, ty, x0, z0, h, topTile,
                             s.art == "upright" and VOLUME_TOP_SHADE or 1)
+          elseif lavenderGround and s.class == "ground" then
+            -- CITY GROUND deliberately makes all flat Lavender floor donors
+            -- one Pallet-light grass family. Source map data and collision stay
+            -- untouched; only the rendered top material is unified.
+            kantoGrassTop(tx, ty, x0, z0, h,
+                          aoShades(tx, ty, h, 1))
           elseif isKantoCourtyardAt(tx, ty) and s.flat then
             kantoCourtyardTop(tx, ty, x0, z0, h,
                              aoShades(tx, ty, h, 1))
-          elseif lavenderGround and s.class == "ground"
-                 and (isLavenderGroundTile(tile)
-                      or isLavenderGroundTile(topTile)) then
-            lavenderGroundTop(tx, ty, x0, z0, h,
-                              aoShades(tx, ty, h, 1))
           elseif towerInterior and s.class == "ground" then
             towerGraniteTop(tx, ty, x0, z0, h,
                             1, topTile,

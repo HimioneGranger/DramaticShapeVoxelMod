@@ -1,3 +1,7 @@
+# Lavender / Route 10 Pallet-light grass correction - 2026-09-10
+
+Legendary CITY GROUND now renders every flat Lavender Town ground cell with the same light grass top used by Pallet Town instead of the older purple/charcoal plaza family. The override is class-based rather than limited to tiles 35/44/57, so alternate ground donors and synthesized floors beneath Tower/sign/building claims cannot leave checkerboard or bald grey squares. Lavender also wins before the generic courtyard material. Route 10 ordinary grass follows the same CITY GROUND choice so the loaded north neighbour does not create a darker seam. Map data, collision, buildings and non-ground geometry are unchanged. Atlas, animated-atlas and disk-cache identities are scoped for the Route 10 dependency.
+
 # Release 1.10.6 - performance profiler producer API
 
 Branch `feature/performance-profiler-v2` is versioned 1.10.6 in both `manifest.json` and `mod.exports.version`. Tag `1.10.6` should point at the published producer API commit.

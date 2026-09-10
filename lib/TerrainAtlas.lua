@@ -459,13 +459,6 @@ local GRASS_ART = {
   "BBSSBBLB", "BSLLSBBB", "SSBLLBBS", "BLBSSSBB",
   "BBSSBLBB", "SBBLSSLB", "BLSBBBSS", "SSBBLSBB",
 }
--- TEST111 Lavender Town uses one restrained earth family for both the authored
--- turf and path cells. Keeping the four swatches close together removes the
--- neon green/flat-grey checkerboard while retaining subtle embedded grain.
-local LAVENDER_GROUND_ART = {
-  "BBBBBBBB", "BBBBBSBB", "BBBBBBBB", "BBLBBBBB",
-  "BBBBBBBB", "BBBBBBBB", "BBBBDBBB", "BBBBBBBB",
-}
 -- TEST115 Pokemon Tower. ChunkMesher now supplies continuous world-space
 -- granite, so this donor is deliberately quiet and cannot announce the 8px
 -- source grid if a fallback face ever samples the whole tile.
@@ -575,10 +568,6 @@ local GRASS = {
   dark={.17,.35,.12,1}, shadow={.22,.43,.16,1},
   body={.27,.50,.20,1}, light={.33,.57,.26,1},
 }
-local LAVENDER_GROUND = {
-  dark={.115,.090,.155,1}, shadow={.160,.125,.210,1},
-  body={.215,.170,.275,1}, light={.285,.230,.350,1},
-}
 local TOWER_FLOOR = {
   dark={.135,.135,.150,1}, shadow={.205,.205,.220,1},
   body={.305,.305,.320,1}, light={.410,.405,.420,1},
@@ -658,10 +647,14 @@ local function communityAtlas(map, colors, base, baked)
   local legendaryCityGround = cityGroundMap and CommunityVisuals.customCityGround()
   local lavenderGround = legendaryCityGround and mapId == "LAVENDER_TOWN"
   local fuchsiaGround = legendaryCityGround and mapId == "FUCHSIA_CITY"
+  local lavenderRouteGrass = tilesetId == "OVERWORLD"
+    and mapId == "ROUTE_10" and CommunityVisuals.customCityGround()
   -- GRASS remains the broad route/Overworld control. The two city maps use
   -- CITY GROUND instead, so choosing Legendary grass cannot force their turf.
+  -- Route 10 is Lavender's visible north neighbour, so its ordinary turf also
+  -- follows this city choice to avoid a dark seam at the connected boundary.
   local grassEnabled = (not cityGroundMap and CommunityVisuals.customGrass())
-    or fuchsiaGround
+    or fuchsiaGround or lavenderRouteGrass
   local towerInterior = tilesetId == "CEMETERY"
     and mapId:match("^POKEMON_TOWER_[1-7]F$") ~= nil
     and CommunityVisuals.customTower()
@@ -687,7 +680,7 @@ local function communityAtlas(map, colors, base, baked)
   -- CITY GROUND changes shared OVERWORLD donors per map. Keep both city maps
   -- isolated even on BATTLE ART: another Legendary Overworld atlas must never
   -- leak its grass donor into a city whose own row is disabled.
-  local perMap = (cityGroundMap or towerInterior
+  local perMap = (cityGroundMap or lavenderRouteGrass or towerInterior
       or (map.renderer and map.renderer.gbcAtlas))
     and tostring(map.id or "") or ""
   local key = map.tileset.image .. "#community-test137-tower-master-wall-options#" .. communityKey()
@@ -832,12 +825,12 @@ local function communityAtlas(map, colors, base, baked)
     end
 
     if lavenderGround then
-      -- $23/$39 are the paired road family and $2C is ordinary turf. Paint
-      -- all three alike because ChunkMesher routes their flat tops through
-      -- the same donor in Lavender; collision and source tiles stay intact.
-      paint(35, LAVENDER_GROUND_ART, LAVENDER_GROUND)
-      paint(44, LAVENDER_GROUND_ART, LAVENDER_GROUND)
-      paint(57, LAVENDER_GROUND_ART, LAVENDER_GROUND)
+      -- Lavender now deliberately borrows Pallet Town's light grass family.
+      -- Paint the historical path/turf donors alike for fallback and side
+      -- faces; ChunkMesher routes every flat Lavender top through tile $2C.
+      paint(35, GRASS_ART, GRASS)
+      paint(44, GRASS_ART, GRASS)
+      paint(57, GRASS_ART, GRASS)
     end
 
     if towerInterior then
@@ -1236,8 +1229,11 @@ function TerrainAtlas.animate(map, colors, base, baked)
   -- the same requirement: Lavender and Fuchsia share the OVERWORLD source
   -- atlas but can deliberately bake different ground into it, so their
   -- immutable animation frames must never be shared by visit order.
+  local mapId = tostring(map.id or ""):upper()
+  local lavenderRouteGrass = map.tileset and map.tileset.id == "OVERWORLD"
+    and mapId == "ROUTE_10" and CommunityVisuals.customCityGround()
   local perMap = ((map.renderer and map.renderer.gbcAtlas)
-      or CommunityVisuals.isCityGroundMap(map)) and map.id or nil
+      or CommunityVisuals.isCityGroundMap(map) or lavenderRouteGrass) and map.id or nil
   local caveMaterial = map.tileset and map.tileset.id == "CAVERN"
     and CommunityVisuals.customCaves()
     and "#legendary-natural-cave" or ""
