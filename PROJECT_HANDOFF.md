@@ -1,3 +1,15 @@
+# LuaJIT TerrainAtlas compile-limit fix - 2026-09-10
+
+The pushed `26845c9` Lavender build reproduced the Mod Manager failure under
+Lupa's LuaJIT 2.1 backend: `lib/TerrainAtlas.lua:996: function at line 704 has
+more than 60 upvalues`. This is a production LuaJIT 5.1 compiler limit, not a
+Kanto First Person dependency failure; Fengari had accepted the same file and
+therefore missed it. Cave-material and Lavender-material painting were lifted
+out of `communityAtlas`'s large protected-build closure, reducing its captured
+locals without changing atlas output. `tools/check_luajit_compile.py` now
+provides a reusable pre-package compile sweep using Lupa's `luajit21` backend.
+All 114 production Lua files compile under that backend after the refactor.
+
 # Lavender authored path-network correction - 2026-09-10
 
 Lavender CITY GROUND now preserves the original `$23/$39` path network visible in the source map instead of flattening every walkable cell to one material. `BATTLE ART` uses the same textured Kanto road donor/treatment as the Route 8, Route 12 and Rock Tunnel approaches for path cells, with the surrounding town floor using the same texture family at a slightly darker broad tone; there is no bright green lawn or flat bright sheet. `LEGENDARY VISUALS` keeps the exact same authored path topology but separates it into a lighter misty lavender-grey road over a lighter dusty mauve/blue-grey earth field, with sparse texture and low-frequency variation rather than the former near-black carpet. Alternate flat donors and synthesized floors beneath signs/buildings follow their source ground/path membership so bald squares do not return. Route 10 is no longer repainted by CITY GROUND at all; Lavender now matches the existing route/cave-exit logic instead of modifying its neighbour. Fuchsia, map data, collision, buildings and non-ground geometry are unchanged. Cache identities invalidate the previous flattened-ground experiments.

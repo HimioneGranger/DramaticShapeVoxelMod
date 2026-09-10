@@ -654,6 +654,60 @@ local function communityKey()
   }, ":")
 end
 
+-- LuaJIT 5.1 has a hard per-function upvalue ceiling. Keep the heavy atlas
+-- builder below that production limit by moving material-specific work into
+-- small helpers instead of capturing every art/palette constant in the large
+-- protected-build closure.
+local function applyCaveCommunityMaterials(map, total, paint, recolor)
+  local shapes = V.require("TileShape").forMap(map)
+  local okRaw, raw = pcall(Assets.imageData, map.tileset.image)
+  if not okRaw then raw = nil end
+  for tile = 0, total - 1 do
+    local shape = shapes[tile]
+    local class = shape and shape.class
+    if class == "wall" then
+      local variant = CAVE_WALL_VARIANT[tile]
+        or ((tile % #CAVE_WALL_ART) + 1)
+      paint(tile, CAVE_WALL_ART[variant], CAVE_ROCK)
+    elseif class == "ledge" then
+      if tile == 21 or tile == 22 then
+        -- These are the drawn north/south stair plates. Preserve their
+        -- tread lines instead of replacing the whole tile with earth.
+        recolor(tile, CAVE_HOLE, raw)
+      else
+        local variant = CAVE_LEDGE_VARIANT[tile]
+          or ((tile % #CAVE_LEDGE_ART) + 1)
+        paint(tile, CAVE_LEDGE_ART[variant], CAVE_SHELF)
+      end
+    elseif class == "ground" then
+      if tile == 20 then
+        paint(tile, CAVE_WATER_ART, CAVE_WATER)
+      elseif tile == 47 or tile == 34 then
+        recolor(tile, CAVE_HOLE, raw)
+      else
+        local variant = CAVE_FLOOR_VARIANT[tile]
+          or ((tile % #CAVE_FLOOR_ART) + 1)
+        paint(tile, CAVE_FLOOR_ART[variant], CAVE_EARTH)
+      end
+    elseif class == "stair_e" or class == "stair_down_e"
+        or class == "relief" then
+      -- Preserve authored rung, stair and switch-plate silhouettes.
+      recolor(tile, CAVE_HOLE, raw)
+    end
+  end
+  -- Stable donor and four swatches used by cave side/perimeter meshes.
+  paint(2, CAVE_WALL_ART[1], CAVE_ROCK)
+end
+
+local function applyLavenderCommunityMaterials(paint)
+  -- Preserve Lavender's source path network instead of collapsing the entire
+  -- town to one material. $23/$39 become a misty lavender-grey road; $2C is
+  -- the quieter surrounding earth donor.
+  paint(35, PATH_ART, LAVENDER_PATH)
+  paint(44, LAVENDER_GROUND_ART, LAVENDER_GROUND)
+  paint(57, PATH_ART, LAVENDER_PATH)
+end
+
 local function communityAtlas(map, colors, base, baked)
   local tilesetId = map.tileset and map.tileset.id
   local mapId = tostring(map.id or ""):upper()
@@ -746,46 +800,7 @@ local function communityAtlas(map, colors, base, baked)
       end
     end
 
-    if cave then
-      local shapes = V.require("TileShape").forMap(map)
-      local okRaw, raw = pcall(Assets.imageData, map.tileset.image)
-      if not okRaw then raw = nil end
-      for tile = 0, total - 1 do
-        local shape = shapes[tile]
-        local class = shape and shape.class
-        if class == "wall" then
-          local variant = CAVE_WALL_VARIANT[tile]
-            or ((tile % #CAVE_WALL_ART) + 1)
-          paint(tile, CAVE_WALL_ART[variant], CAVE_ROCK)
-        elseif class == "ledge" then
-          if tile == 21 or tile == 22 then
-            -- These are the drawn north/south stair plates. Preserve their
-            -- tread lines instead of replacing the whole tile with earth.
-            recolor(tile, CAVE_HOLE, raw)
-          else
-            local variant = CAVE_LEDGE_VARIANT[tile]
-              or ((tile % #CAVE_LEDGE_ART) + 1)
-            paint(tile, CAVE_LEDGE_ART[variant], CAVE_SHELF)
-          end
-        elseif class == "ground" then
-          if tile == 20 then
-            paint(tile, CAVE_WATER_ART, CAVE_WATER)
-          elseif tile == 47 or tile == 34 then
-            recolor(tile, CAVE_HOLE, raw)
-          else
-            local variant = CAVE_FLOOR_VARIANT[tile]
-              or ((tile % #CAVE_FLOOR_ART) + 1)
-            paint(tile, CAVE_FLOOR_ART[variant], CAVE_EARTH)
-          end
-        elseif class == "stair_e" or class == "stair_down_e"
-            or class == "relief" then
-          -- Preserve authored rung, stair and switch-plate silhouettes.
-          recolor(tile, CAVE_HOLE, raw)
-        end
-      end
-      -- Stable donor and four swatches used by cave side/perimeter meshes.
-      paint(2, CAVE_WALL_ART[1], CAVE_ROCK)
-    end
+    if cave then applyCaveCommunityMaterials(map, total, paint, recolor) end
 
     if tilesetId == "OVERWORLD" and CommunityVisuals.customWalls() then
       local shapes = V.require("TileShape").forMap(map)
@@ -835,15 +850,7 @@ local function communityAtlas(map, colors, base, baked)
       end
     end
 
-    if lavenderGround then
-      -- Preserve Lavender's source path network instead of collapsing the
-      -- entire town to one material. $23/$39 become a misty lavender-grey road;
-      -- $2C is the quieter surrounding earth donor. ChunkMesher redirects other
-      -- flat ground donors to $2C while keeping source path membership intact.
-      paint(35, PATH_ART, LAVENDER_PATH)
-      paint(44, LAVENDER_GROUND_ART, LAVENDER_GROUND)
-      paint(57, PATH_ART, LAVENDER_PATH)
-    end
+    if lavenderGround then applyLavenderCommunityMaterials(paint) end
 
     if towerInterior then
       local okRaw, raw = pcall(Assets.imageData, map.tileset.image)
