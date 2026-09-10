@@ -1,3 +1,18 @@
+# Lavender atlas donor correction and Route 10 palette - 2026-09-10
+
+Battle Art Lavender now paints its sandy $23/$39 atlas donors even when
+ROADS is disabled. The mesher already sampled $39 unconditionally, but the
+atlas previously retained the source city palette in that setting combination.
+Legendary Route 10 has brighter flat/tall grass with map-isolated static and
+animated atlases; other routes and Fuchsia keep their existing palettes.
+Lavender's disk fingerprint advances to authored-path-network-v3.
+
+The focused suite now checks real mocked atlas pixels as well as geometry:
+40 checks pass, and all 114 production Lua files compile under LuaJIT 2.1.
+These are headless checks, not in-game visual validation. The full cave-mouth
+to town ground coverage and flower placement behind Pokemon Tower remain
+pending; this change does not claim to implement those geometry requests.
+
 # LuaJIT TerrainAtlas compile-limit fix - 2026-09-10
 
 The pushed `26845c9` Lavender build reproduced the Mod Manager failure under

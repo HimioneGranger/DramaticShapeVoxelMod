@@ -298,4 +298,55 @@ local routeAnimated = TerrainAtlas.animate(animatedMap('ROUTE_1'), nil, {}, fals
 local routeShared = TerrainAtlas.animate(animatedMap('ROUTE_2'), nil, {}, false)
 check(routeAnimated == routeShared and built == 4,
   'ordinary OVERWORLD maps retain the bounded shared animated cache')
+-- Exercise actual atlas pixels: geometry signatures alone missed the default
+-- road donor retaining Lavender's green source palette when ROADS was off.
+local function upvalue(fn, wanted)
+  for i = 1, 100 do
+    local name, value = debug.getupvalue(fn, i)
+    if not name then break end
+    if name == wanted then return value end
+  end
+  error('missing atlas seam: ' .. wanted)
+end
+local function pixels()
+  local p = { values = {} }
+  function p:getDimensions() return 128, 48 end
+  function p:getPixel(x, y)
+    return unpack(self.values[y * 128 + x] or {.1, .8, .1, 1})
+  end
+  function p:setPixel(x, y, ...) self.values[y * 128 + x] = {...} end
+  function p:paste(src)
+    for y = 0, 47 do for x = 0, 127 do
+      self:setPixel(x, y, src:getPixel(x, y))
+    end end
+  end
+  return p
+end
+love = {
+  image = { newImageData = pixels },
+  graphics = { newImage = function(data)
+    return { data = data, setFilter = function() end, release = function() end }
+  end },
+}
+local atlas = upvalue(TerrainAtlas.forMap, 'communityAtlas')
+local function material(id, city, grass)
+  Community.cityGround.value = city and 'n64memory' or 'default'
+  Community.grass.value = grass and 'n64memory' or 'default'
+  Community.roads.value = 'default'
+  local _, data = atlas(cacheMap(id), {}, {}, pixels())
+  return data
+end
+local sand = material('LAVENDER_TOWN', false, false)
+local r, g, b = sand:getPixel(9 * 8, 3 * 8) -- $39 road donor
+check(r > g and g > b, 'Battle Art Lavender owns a sandy road donor with ROADS off')
+local rr, rg, rb = sand:getPixel(8, 0)
+check(rr == .1 and rg == .8 and rb == .1, 'Lavender material paint leaves unrelated roof pixels intact')
+local routeGrass = material('ROUTE_10', false, true)
+local ordinaryGrass = material('ROUTE_1', false, true)
+local _, bright = routeGrass:getPixel(12 * 8, 2 * 8)
+local _, ordinary = ordinaryGrass:getPixel(12 * 8, 2 * 8)
+check(bright > ordinary, 'Route 10 grass is visibly brighter without changing other routes')
+check(routeGrass ~= ordinaryGrass, 'Route 10 static atlas cannot leak its palette into ordinary routes')
+local route10Animated = TerrainAtlas.animate(animatedMap('ROUTE_10'), nil, {}, false)
+check(route10Animated ~= routeShared, 'Route 10 animated atlas is isolated from other routes')
 print(checks .. ' checks passed (city ground option)')

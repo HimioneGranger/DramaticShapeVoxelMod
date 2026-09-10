@@ -575,6 +575,10 @@ local GRASS = {
   dark={.17,.35,.12,1}, shadow={.22,.43,.16,1},
   body={.27,.50,.20,1}, light={.33,.57,.26,1},
 }
+local ROUTE10_GRASS = {
+  dark={.23,.46,.13,1}, shadow={.30,.57,.18,1},
+  body={.38,.68,.24,1}, light={.47,.77,.32,1},
+}
 local LAVENDER_GROUND = {
   dark={.185,.180,.240,1}, shadow={.275,.265,.335,1},
   body={.390,.375,.455,1}, light={.505,.490,.565,1},
@@ -699,7 +703,14 @@ local function applyCaveCommunityMaterials(map, total, paint, recolor)
   paint(2, CAVE_WALL_ART[1], CAVE_ROCK)
 end
 
-local function applyLavenderCommunityMaterials(paint)
+local function applyLavenderCommunityMaterials(paint, legendary)
+  if not legendary then
+    -- The mesher always samples $39 for Battle Art ground, even with ROADS
+    -- disabled. Own that donor here instead of inheriting the city's palette.
+    paint(35, PATH_ART, PATH)
+    paint(57, PATH_ART, PATH)
+    return
+  end
   -- Preserve Lavender's source path network instead of collapsing the entire
   -- town to one material. $23/$39 become a misty lavender-grey road; $2C is
   -- the quieter surrounding earth donor.
@@ -714,7 +725,7 @@ local function communityAtlas(map, colors, base, baked)
   local cave = tilesetId == "CAVERN"
   local cityGroundMap = CommunityVisuals.isCityGroundMap(map)
   local legendaryCityGround = cityGroundMap and CommunityVisuals.customCityGround()
-  local lavenderGround = legendaryCityGround and mapId == "LAVENDER_TOWN"
+  local lavenderGround = cityGroundMap and mapId == "LAVENDER_TOWN"
   local fuchsiaGround = legendaryCityGround and mapId == "FUCHSIA_CITY"
   -- GRASS remains the broad route/Overworld control. The two city maps use
   -- CITY GROUND instead, so choosing Legendary grass cannot force their turf.
@@ -745,7 +756,7 @@ local function communityAtlas(map, colors, base, baked)
   -- CITY GROUND changes shared OVERWORLD donors per map. Keep both city maps
   -- isolated even on BATTLE ART: another Legendary Overworld atlas must never
   -- leak its grass donor into a city whose own row is disabled.
-  local perMap = (cityGroundMap or towerInterior
+  local perMap = (cityGroundMap or mapId == "ROUTE_10" or towerInterior
       or (map.renderer and map.renderer.gbcAtlas))
     and tostring(map.id or "") or ""
   local key = map.tileset.image .. "#community-test137-tower-master-wall-options#" .. communityKey()
@@ -829,7 +840,7 @@ local function communityAtlas(map, colors, base, baked)
     end
 
     if tilesetId == "OVERWORLD" and grassEnabled then
-      paint(44, GRASS_ART, GRASS)
+      paint(44, GRASS_ART, mapId == "ROUTE_10" and ROUTE10_GRASS or GRASS)
       local tall = map.tileset.grassTile
       if type(tall) == "number" then tall = math.floor(tall) end
       if type(tall) == "number" and tall >= 0 and tall < total and tall ~= 44 then
@@ -842,7 +853,12 @@ local function communityAtlas(map, colors, base, baked)
             for px = 0, 7 do
               local sourceR = raw:getPixel(ox + px, oy + py)
               local _, _, _, alpha = data:getPixel(ox + px, oy + py)
-              local c = TALL_GRASS[shadeOf(sourceR)]
+              local shade = shadeOf(sourceR)
+              local c = mapId == "ROUTE_10" and (
+                shade == 1 and ROUTE10_GRASS.light
+                or shade == 2 and ROUTE10_GRASS.body
+                or shade == 3 and ROUTE10_GRASS.shadow
+                or ROUTE10_GRASS.dark) or TALL_GRASS[shade]
               data:setPixel(ox + px, oy + py, c[1], c[2], c[3], alpha)
             end
           end
@@ -850,7 +866,7 @@ local function communityAtlas(map, colors, base, baked)
       end
     end
 
-    if lavenderGround then applyLavenderCommunityMaterials(paint) end
+    if lavenderGround then applyLavenderCommunityMaterials(paint, legendaryCityGround) end
 
     if towerInterior then
       local okRaw, raw = pcall(Assets.imageData, map.tileset.image)
@@ -1249,7 +1265,8 @@ function TerrainAtlas.animate(map, colors, base, baked)
   -- atlas but can deliberately bake different ground into it, so their
   -- immutable animation frames must never be shared by visit order.
   local perMap = ((map.renderer and map.renderer.gbcAtlas)
-      or CommunityVisuals.isCityGroundMap(map)) and map.id or nil
+      or CommunityVisuals.isCityGroundMap(map)
+      or tostring(map.id or ""):upper() == "ROUTE_10") and map.id or nil
   local caveMaterial = map.tileset and map.tileset.id == "CAVERN"
     and CommunityVisuals.customCaves()
     and "#legendary-natural-cave" or ""

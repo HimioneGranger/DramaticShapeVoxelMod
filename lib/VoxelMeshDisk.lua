@@ -531,7 +531,7 @@ function Disk.fingerprint(map, slot, masks, kind)
   -- CITY GROUND fully owns Lavender/Fuchsia turf. The broad GRASS row is not
   -- a geometry/material input there, so do not create redundant city cache
   -- variants when a player changes route grass independently. Route 10 is not
-  -- a city map: outside the fixed Lavender seam it still follows GRASS.
+  -- a city map and still follows GRASS.
   if not cityGroundMap then parts[#parts + 1] = CommunityVisuals.grass:get() end
   if kind == "aux" then
     -- TEST138 removes only exposed east tile-boundary caps while preserving
@@ -545,7 +545,7 @@ function Disk.fingerprint(map, slot, masks, kind)
     parts[#parts + 1] = "city-ground-option-v4"
     parts[#parts + 1] = CommunityVisuals.cityGround:get()
     if mapId == "LAVENDER_TOWN" then
-      parts[#parts + 1] = "lavender-authored-path-network-v2"
+      parts[#parts + 1] = "lavender-authored-path-network-v3"
     end
   end
   if mapId:match("^POKEMON_TOWER_[1-7]F$") then
