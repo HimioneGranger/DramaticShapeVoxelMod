@@ -738,9 +738,11 @@ local SETTINGS = {
     .. "Kanto wayfinder with live location labels, including Viridian Forest.",
     full = true },
   { CommunityVisuals.cityGround,
-    "Choose the original Lavender/Fuchsia tileset ground or Legendary Visuals' "
-    .. "city treatment. This is independent of GRASS, so Legendary route and "
-    .. "encounter turf can stay enabled without replacing city ground.",
+    "Choose Battle Art city ground or Legendary Visuals' city treatment. In "
+    .. "Lavender, Battle Art preserves the authored path network with the same "
+    .. "textured road family used by the Route 8/12 approaches; Legendary uses "
+    .. "the separate haunted lavender ground treatment. This is independent of "
+    .. "GRASS, so route and encounter turf can be changed separately.",
     full = true },
   { CommunityVisuals.grass,
     "Choose the original Overworld turf and encounter grass or TEST435's "
