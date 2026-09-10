@@ -108,9 +108,10 @@ local function fixture(id, tile, claimed, tileY, mapHeight)
   }
 end
 
-local function signature(id, city, grass, tile, claimed, tileY, mapHeight)
+local function signature(id, city, grass, tile, claimed, tileY, mapHeight, roads)
   Community.cityGround.value = city and 'n64memory' or 'default'
   Community.grass.value = grass and 'n64memory' or 'default'
+  Community.roads.value = roads and 'n64memory' or 'default'
   local vertices = C.geometry(fixture(id, tile, claimed, tileY, mapHeight), true)
   local out = {}
   for _, vertex in ipairs(vertices) do
@@ -141,35 +142,56 @@ local palletBattle, palletN = signature('PALLET_TOWN', false, false)
 local palletGrass, palletGrassN = signature('PALLET_TOWN', false, true)
 check(palletN == palletGrassN and not same(palletBattle, palletGrass),
   'GRASS still controls ordinary Overworld turf outside the two city maps')
-local connectorBattle, connectorN = signature('ROUTE_8', false, false, 35)
-check(lavenderN == connectorN and same(lavenderBattle, connectorBattle),
-  'Lavender CITY GROUND Battle Art uses the raw Route 8/12 connector donor')
+local connectorPath, connectorPathN = signature('ROUTE_8', false, false, 35,
+  false, 1, 1, true)
+local lavenderBattlePath35, lavenderBattlePath35N = signature('LAVENDER_TOWN', false, false, 35)
+local lavenderBattlePath57, lavenderBattlePath57N = signature('LAVENDER_TOWN', false, false, 57)
+check(lavenderBattlePath35N == connectorPathN
+    and same(lavenderBattlePath35, connectorPath),
+  'Lavender Battle Art paths use the same textured Kanto road treatment as Route 8/12')
+check(lavenderBattlePath57N == lavenderBattlePath35N
+    and same(lavenderBattlePath57, lavenderBattlePath35),
+  'Lavender source $23/$39 path cells resolve to one continuous path material')
+check(lavenderN == lavenderBattlePath35N and not same(lavenderBattle, lavenderBattlePath35),
+  'Lavender Battle Art keeps surrounding town ground visually distinct from its authored paths')
+
+local lavenderLegendaryPath35, lavenderLegendaryPath35N = signature('LAVENDER_TOWN', true, false, 35)
+local lavenderLegendaryPath57, lavenderLegendaryPath57N = signature('LAVENDER_TOWN', true, false, 57)
 check(lavenderLegendaryN == lavenderN and not same(lavenderLegendary, lavenderBattle)
     and not same(lavenderLegendary, palletGrass),
-  'Lavender CITY GROUND Legendary is a distinct smoky ground treatment')
-for _, tile in ipairs({35, 57, 90}) do
-  local battleVariant, battleN = signature('LAVENDER_TOWN', false, false, tile)
-  local legendaryVariant, legendaryN = signature('LAVENDER_TOWN', true, false, tile)
-  check(battleN == lavenderN and same(battleVariant, lavenderBattle),
-    'Lavender Battle Art flat source tile '..tile..' resolves to connector ground')
-  check(legendaryN == lavenderLegendaryN and same(legendaryVariant, lavenderLegendary),
-    'Lavender Legendary flat source tile '..tile..' resolves to one smoky family')
-end
-local claimedLavender, claimedLavenderN = signature('LAVENDER_TOWN', false, false, 90, true)
-local claimedLavenderLegendary, claimedLavenderLegendaryN = signature('LAVENDER_TOWN', true, false, 90, true)
-check(claimedLavenderN == lavenderN and same(claimedLavender, lavenderBattle),
-  'Lavender Battle Art synthesized ground under props uses connector ground')
-check(claimedLavenderLegendaryN == lavenderLegendaryN
-    and same(claimedLavenderLegendary, lavenderLegendary),
-  'Lavender Legendary synthesized ground under props uses smoky ground')
+  'Lavender CITY GROUND Legendary is a distinct lighter haunted ground treatment')
+check(lavenderLegendaryPath35N == lavenderLegendaryPath57N
+    and same(lavenderLegendaryPath35, lavenderLegendaryPath57),
+  'Lavender Legendary preserves the $23/$39 authored path network as one material')
+check(lavenderLegendaryPath35N == lavenderLegendaryN
+    and not same(lavenderLegendaryPath35, lavenderLegendary),
+  'Lavender Legendary paths stay visibly distinct from the surrounding ground')
+
+local battleGround90, battleGround90N = signature('LAVENDER_TOWN', false, false, 90)
+local legendaryGround90, legendaryGround90N = signature('LAVENDER_TOWN', true, false, 90)
+check(battleGround90N == lavenderN and same(battleGround90, lavenderBattle),
+  'alternate Lavender flat ground donors cannot become bald Battle Art slabs')
+check(legendaryGround90N == lavenderLegendaryN and same(legendaryGround90, lavenderLegendary),
+  'alternate Lavender flat ground donors cannot become bald Legendary slabs')
+
+local claimedLavenderGround, claimedLavenderGroundN = signature('LAVENDER_TOWN', false, false, 90, true)
+local claimedLavenderPath, claimedLavenderPathN = signature('LAVENDER_TOWN', false, false, 35, true)
+local claimedLavenderLegendaryGround, claimedLavenderLegendaryGroundN = signature('LAVENDER_TOWN', true, false, 90, true)
+local claimedLavenderLegendaryPath, claimedLavenderLegendaryPathN = signature('LAVENDER_TOWN', true, false, 35, true)
+check(claimedLavenderGroundN == lavenderN and same(claimedLavenderGround, lavenderBattle)
+    and claimedLavenderPathN == lavenderBattlePath35N
+    and same(claimedLavenderPath, lavenderBattlePath35),
+  'Lavender Battle Art synthesized floors preserve ground versus path membership')
+check(claimedLavenderLegendaryGroundN == lavenderLegendaryN
+    and same(claimedLavenderLegendaryGround, lavenderLegendary)
+    and claimedLavenderLegendaryPathN == lavenderLegendaryPath35N
+    and same(claimedLavenderLegendaryPath, lavenderLegendaryPath35),
+  'Lavender Legendary synthesized floors preserve ground versus path membership')
+
 local route10South, route10SouthN = signature('ROUTE_10', false, false, 90, false, 143, 36)
-local route10SouthLegendary, route10SouthLegendaryN = signature('ROUTE_10', true, false, 57, false, 143, 36)
-check(route10SouthN == connectorN and same(route10South, connectorBattle)
-    and route10SouthLegendaryN == connectorN and same(route10SouthLegendary, connectorBattle),
-  'Route 10 final twelve rows stay on neutral connector ground in both CITY GROUND modes')
-local route10Interior = signature('ROUTE_10', false, false, 57, false, 100, 36)
-check(not same(route10Interior, connectorBattle),
-  'Route 10 interior terrain outside the Lavender seam keeps its authored donor')
+local route10InteriorSame, route10InteriorSameN = signature('ROUTE_10', false, false, 90, false, 100, 36)
+check(route10SouthN == route10InteriorSameN and same(route10South, route10InteriorSame),
+  'Route 10 south edge is no longer repainted by Lavender CITY GROUND')
 local route10InteriorGrass = signature('ROUTE_10', false, true, 44, false, 100, 36)
 local route10InteriorBattle = signature('ROUTE_10', false, false, 44, false, 100, 36)
 check(not same(route10InteriorGrass, route10InteriorBattle),
@@ -210,7 +232,7 @@ check(lavenderCache ~= fingerprint('LAVENDER_TOWN', true, false),
   'Lavender CITY GROUND modes have distinct persistent mesh identities')
 local route10Cache = fingerprint('ROUTE_10', false, false)
 check(route10Cache == fingerprint('ROUTE_10', true, false),
-  'Route 10 Lavender seam is not a CITY GROUND cache dependency')
+  'Route 10 is not a CITY GROUND cache dependency')
 check(route10Cache ~= fingerprint('ROUTE_10', false, true),
   'Route 10 interior terrain remains a global GRASS cache dependency')
 local palletCache = fingerprint('PALLET_TOWN', false, false)

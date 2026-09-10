@@ -542,17 +542,11 @@ function Disk.fingerprint(map, slot, masks, kind)
   end
   parts[#parts + 1] = CommunityVisuals.roads:get()
   if cityGroundMap then
-    parts[#parts + 1] = "city-ground-option-v3"
+    parts[#parts + 1] = "city-ground-option-v4"
     parts[#parts + 1] = CommunityVisuals.cityGround:get()
     if mapId == "LAVENDER_TOWN" then
-      parts[#parts + 1] = "lavender-battle-connector-legendary-smoky-v1"
+      parts[#parts + 1] = "lavender-authored-path-network-v2"
     end
-  end
-  -- Route 10's final twelve tile rows are Lavender's loaded north neighbour.
-  -- Their neutral connector material is fixed, but the rest of Route 10 keeps
-  -- normal GRASS ownership, so only the contract token is special here.
-  if mapId == "ROUTE_10" then
-    parts[#parts + 1] = "lavender-route10-connector-strip-v3"
   end
   if mapId:match("^POKEMON_TOWER_[1-7]F$") then
     parts[#parts + 1] = "pokemon-tower-stone-v14-master-wall-blue-void"

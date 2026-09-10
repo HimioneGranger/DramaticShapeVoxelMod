@@ -87,7 +87,6 @@ local ChunkMesher = {}
 local KANTO_PATH_TILE = { [35] = true, [57] = true }
 local KANTO_COURTYARD_ANCHOR_TILE = { [16] = true, [33] = true }
 local KANTO_BLOCK55_COURT_TILE = 91
-local KANTO_CONNECTOR_GROUND_TILE = 35
 local KANTO_PATH_SWATCH_TILE = 57
 local KANTO_WOOD_TILE = 60
 local KANTO_GRASS_TILE = 44
@@ -572,7 +571,6 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   local lavenderGround = tileset.id == "OVERWORLD" and mapId == "LAVENDER_TOWN"
   local lavenderLegendaryGround = lavenderGround and legendaryCityGround
   local fuchsiaGround = legendaryCityGround and mapId == "FUCHSIA_CITY"
-  local lavenderRoute10 = tileset.id == "OVERWORLD" and mapId == "ROUTE_10"
   local customGrass = CommunityVisuals.customGrass() and not cityGroundMap
   local grassReplacement = customGrass or fuchsiaGround
   local towerInterior = tileset.id == "CEMETERY"
@@ -876,15 +874,6 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   local def = map.def
   local tw, th = def.width * 4, def.height * 4         -- map size in tiles
   local r = bodyOnly and 0 or RING * 4
-
-  -- Pokemon Tower's upper twelve 8px rows are authored at the very south end
-  -- of Route 10 (see voxel_heights pokemon_tower_top at y=132 on the 144-row
-  -- route). That is exactly the neighbour strip visible from Lavender. Keep
-  -- that seam on Battle Art's neutral connector donor in both CITY GROUND
-  -- modes; the rest of Route 10 remains controlled by its normal settings.
-  local function lavenderConnectorAt(tx, ty)
-    return lavenderRoute10 and ty >= th - 12
-  end
 
   -- TEST402 Kanto bedrock. TerrainAtlas writes these four warm-stone
   -- swatches into the first row of every authored ledge tile.  Sampling
@@ -1713,6 +1702,24 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
          grassShades(x0, z0, shade))
   end
 
+  local function lavenderPathTile(tile)
+    return KANTO_PATH_TILE[tile] == true
+  end
+
+  -- Battle Art Lavender uses the same textured road donor as the three exits,
+  -- but the non-path town floor is slightly darker. This keeps the original
+  -- path network legible without reintroducing bright green turf or a flat
+  -- single-colour sheet.
+  local function lavenderBattleGroundTop(tx, ty, x0, z0, h, shade)
+    local x1, z1 = x0 + 8, z0 + 8
+    local variant = math.floor(rockNoise(tx, ty, 1123) * 4)
+    local broad = 0.855 + smoothPathNoise(x0 * 0.52, z0 * 0.52, 1129) * 0.055
+    push({ { x0, h, z0 }, { x1, h, z0 },
+           { x1, h, z1 }, { x0, h, z1 } },
+         pavedUV(KANTO_PATH_SWATCH_TILE, variant),
+         shadeTimes(aoShades(tx, ty, h, shade), broad))
+  end
+
   local function lavenderGroundShades(x0, z0, shade)
     local corners = {
       { x0, z0 }, { x0 + 8, z0 },
@@ -1736,7 +1743,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     local variant = math.floor(rockNoise(tx, ty, 1111) * 4)
     push({ { x0, h, z0 }, { x1, h, z0 },
            { x1, h, z1 }, { x0, h, z1 } },
-         pavedUV(KANTO_PATH_SWATCH_TILE, variant),
+         pavedUV(KANTO_GRASS_TILE, variant),
          lavenderGroundShades(x0, z0, shade))
   end
 
@@ -2517,17 +2524,17 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           elseif caveKind then
             caveNaturalTop(tx, ty, tx * 8, ty * 8, 0, 1, caveKind)
           elseif lavenderGround then
-            -- CITY GROUND deliberately owns every synthesized Lavender floor,
-            -- including Tower/sign/building claims that inherit odd donors.
-            if lavenderLegendaryGround then
+            -- Preserve Lavender's authored path membership even under signs
+            -- and claimed building edges. Only the material family changes.
+            if lavenderPathTile(g) then
+              kantoPavedTop(tx, ty, tx * 8, ty * 8, 0,
+                            aoShades(tx, ty, 0, 1))
+            elseif lavenderLegendaryGround then
               lavenderGroundTop(tx, ty, tx * 8, ty * 8, 0,
                                 aoShades(tx, ty, 0, 1))
             else
-              -- Battle Art matches the broad neutral Route 8/12 connector.
-              topQuad(tx * 8, ty * 8, 0, KANTO_CONNECTOR_GROUND_TILE, 1)
+              lavenderBattleGroundTop(tx, ty, tx * 8, ty * 8, 0, 1)
             end
-          elseif lavenderConnectorAt(tx, ty) then
-            topQuad(tx * 8, ty * 8, 0, KANTO_CONNECTOR_GROUND_TILE, 1)
           elseif isKantoCourtyardAt(tx, ty, g) then
             kantoCourtyardTop(tx, ty, tx * 8, ty * 8, 0,
                              aoShades(tx, ty, 0, 1))
@@ -2698,16 +2705,17 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
             forestGroundTop(tx, ty, x0, z0, h, topTile,
                             s.art == "upright" and VOLUME_TOP_SHADE or 1)
           elseif lavenderGround and s.class == "ground" then
-            if lavenderLegendaryGround then
+            local lavenderPath = lavenderPathTile(tile) or lavenderPathTile(topTile)
+            if lavenderPath then
+              -- Same textured path treatment used by the connected Kanto
+              -- roads; the source $23/$39 cells retain their exact topology.
+              kantoPavedTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))
+            elseif lavenderLegendaryGround then
               lavenderGroundTop(tx, ty, x0, z0, h,
                                 aoShades(tx, ty, h, 1))
             else
-              -- Battle Art uses the exact raw $23 connector donor rather than
-              -- bright $2C grass or the old authored gray/green alternation.
-              topQuad(x0, z0, h, KANTO_CONNECTOR_GROUND_TILE, 1)
+              lavenderBattleGroundTop(tx, ty, x0, z0, h, 1)
             end
-          elseif lavenderConnectorAt(tx, ty) and s.class == "ground" then
-            topQuad(x0, z0, h, KANTO_CONNECTOR_GROUND_TILE, 1)
           elseif isKantoCourtyardAt(tx, ty) and s.flat then
             kantoCourtyardTop(tx, ty, x0, z0, h,
                              aoShades(tx, ty, h, 1))

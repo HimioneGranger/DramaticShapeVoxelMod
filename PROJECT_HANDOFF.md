@@ -1,6 +1,6 @@
-# Lavender CITY GROUND split / Route 10 connector correction - 2026-09-10
+# Lavender authored path-network correction - 2026-09-10
 
-Lavender now has deliberately different CITY GROUND presentations. `BATTLE ART` routes every flat town ground cell (including synthesized floors beneath Tower/sign/building claims) through raw OVERWORLD tile `$23`, matching the broad neutral ground used at the Route 8/Route 12 connectors instead of forcing bright `$2C` lawn. `LEGENDARY VISUALS` routes the same complete flat-ground coverage through a muted smoky lavender/charcoal/dusty-mauve earth-stone family with sparse flecks and broad world-space tonal variation, avoiding both green carpet and the authored 8px checkerboard. The final 12 tile rows at Route 10's Lavender edge stay on the neutral connector donor in either CITY GROUND mode, while the rest of Route 10 continues to honor the normal global GRASS setting. Fuchsia behavior is unchanged. Map data, collision, buildings and non-ground geometry remain untouched; disk and animated-atlas identities distinguish Lavender's two modes and invalidate the prior lawn experiment.
+Lavender CITY GROUND now preserves the original `$23/$39` path network visible in the source map instead of flattening every walkable cell to one material. `BATTLE ART` uses the same textured Kanto road donor/treatment as the Route 8, Route 12 and Rock Tunnel approaches for path cells, with the surrounding town floor using the same texture family at a slightly darker broad tone; there is no bright green lawn or flat bright sheet. `LEGENDARY VISUALS` keeps the exact same authored path topology but separates it into a lighter misty lavender-grey road over a lighter dusty mauve/blue-grey earth field, with sparse texture and low-frequency variation rather than the former near-black carpet. Alternate flat donors and synthesized floors beneath signs/buildings follow their source ground/path membership so bald squares do not return. Route 10 is no longer repainted by CITY GROUND at all; Lavender now matches the existing route/cave-exit logic instead of modifying its neighbour. Fuchsia, map data, collision, buildings and non-ground geometry are unchanged. Cache identities invalidate the previous flattened-ground experiments.
 # Release 1.10.6 - performance profiler producer API
 
 Branch `feature/performance-profiler-v2` is versioned 1.10.6 in both `manifest.json` and `mod.exports.version`. Tag `1.10.6` should point at the published producer API commit.
@@ -54,7 +54,7 @@ standalone checkout because its engine-side `tests.modkit` fixture is absent.
 Native LuaJIT/engine gameplay and actual Lavender/Fuchsia visual comparison are
 still required before release. Draft branch is prepared for desktop QA; no deployment or cache-revision bump.
 
-# Local PR #52/#53 integration — 2026-09-09
+# Local PR #52/#53 integration â€” 2026-09-09
 
 Branch `codex/legendary-pr52-pr53-integration` starts from the user's local
 master `b435d467b55b1c743a13193e794e3dcce5e8b1a2`. Integrated PR #52
@@ -82,9 +82,9 @@ These are headless/mocked checks; Android gameplay, GPU visuals, Tower memory
 cost and frame time still require device validation. Earlier reports below
 are historical. This integration is local; no remote push or master merge.
 
-# Safari ground coverage and cache refresh — 2026-09-08
+# Safari ground coverage and cache refresh â€” 2026-09-08
 
-Complete olive treatment for flat grass tile94 and hedge/edge variants13,79,84–93.
+Complete olive treatment for flat grass tile94 and hedge/edge variants13,79,84â€“93.
 Only four outdoor Safari atlases change; non-green detail/alpha retained on edges.
 Native engine0.2.27 captured all four maps: 567 changed atlas pixels, all outside
 new coverage unchanged; tile94 matches tile0 exactly. No Quest validation.

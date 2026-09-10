@@ -576,8 +576,12 @@ local GRASS = {
   body={.27,.50,.20,1}, light={.33,.57,.26,1},
 }
 local LAVENDER_GROUND = {
-  dark={.105,.095,.135,1}, shadow={.155,.140,.185,1},
-  body={.235,.205,.255,1}, light={.330,.295,.345,1},
+  dark={.185,.180,.240,1}, shadow={.275,.265,.335,1},
+  body={.390,.375,.455,1}, light={.505,.490,.565,1},
+}
+local LAVENDER_PATH = {
+  dark={.300,.305,.385,1}, shadow={.395,.400,.480,1},
+  body={.515,.520,.600,1}, light={.635,.640,.710,1},
 }
 local TOWER_FLOOR = {
   dark={.135,.135,.150,1}, shadow={.205,.205,.220,1},
@@ -832,13 +836,13 @@ local function communityAtlas(map, colors, base, baked)
     end
 
     if lavenderGround then
-      -- CITY GROUND -> LEGENDARY VISUALS deliberately owns the old path/turf
-      -- donors after the generic road/grass passes. Every flat Lavender top is
-      -- routed through this family by ChunkMesher, so source checker structure
-      -- cannot reappear while side/fallback samples remain tonally coherent.
-      paint(35, LAVENDER_GROUND_ART, LAVENDER_GROUND)
+      -- Preserve Lavender's source path network instead of collapsing the
+      -- entire town to one material. $23/$39 become a misty lavender-grey road;
+      -- $2C is the quieter surrounding earth donor. ChunkMesher redirects other
+      -- flat ground donors to $2C while keeping source path membership intact.
+      paint(35, PATH_ART, LAVENDER_PATH)
       paint(44, LAVENDER_GROUND_ART, LAVENDER_GROUND)
-      paint(57, LAVENDER_GROUND_ART, LAVENDER_GROUND)
+      paint(57, PATH_ART, LAVENDER_PATH)
     end
 
     if towerInterior then
