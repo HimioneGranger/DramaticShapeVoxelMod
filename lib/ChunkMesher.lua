@@ -87,6 +87,7 @@ local ChunkMesher = {}
 local KANTO_PATH_TILE = { [35] = true, [57] = true }
 local KANTO_COURTYARD_ANCHOR_TILE = { [16] = true, [33] = true }
 local KANTO_BLOCK55_COURT_TILE = 91
+local KANTO_CONNECTOR_GROUND_TILE = 35
 local KANTO_PATH_SWATCH_TILE = 57
 local KANTO_WOOD_TILE = 60
 local KANTO_GRASS_TILE = 44
@@ -567,17 +568,12 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   local mapId = tostring(map.id or ""):upper()
   local cityGroundMap = CommunityVisuals.isCityGroundMap(map)
   -- CITY GROUND owns Lavender/Fuchsia independently of the broad GRASS row.
-  -- Lavender is intentionally fixed in both CITY GROUND modes: its authored
-  -- map alternates several flat ground donors, but the 3D treatment should
-  -- present all of them as Pallet Town's ordinary sparse lawn tile ($2C).
   local legendaryCityGround = cityGroundMap and CommunityVisuals.customCityGround()
   local lavenderGround = tileset.id == "OVERWORLD" and mapId == "LAVENDER_TOWN"
+  local lavenderLegendaryGround = lavenderGround and legendaryCityGround
   local fuchsiaGround = legendaryCityGround and mapId == "FUCHSIA_CITY"
   local lavenderRoute10 = tileset.id == "OVERWORLD" and mapId == "ROUTE_10"
-  -- Route 10's ordinary grass must retain the same sparse source donor as the
-  -- Lavender seam even when the broad GRASS row is set to LEGENDARY.
-  local customGrass = CommunityVisuals.customGrass()
-    and not cityGroundMap and not lavenderRoute10
+  local customGrass = CommunityVisuals.customGrass() and not cityGroundMap
   local grassReplacement = customGrass or fuchsiaGround
   local towerInterior = tileset.id == "CEMETERY"
     and mapId:match("^POKEMON_TOWER_[1-7]F$") ~= nil
@@ -884,10 +880,9 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   -- Pokemon Tower's upper twelve 8px rows are authored at the very south end
   -- of Route 10 (see voxel_heights pokemon_tower_top at y=132 on the 144-row
   -- route). That is exactly the neighbour strip visible from Lavender. Keep
-  -- the correction local to those final twelve rows so the rest of Route 10
-  -- retains its actual roads/bridges/terrain.
-  local function lavenderLawnAt(tx, ty)
-    if lavenderGround then return true end
+  -- that seam on Battle Art's neutral connector donor in both CITY GROUND
+  -- modes; the rest of Route 10 remains controlled by its normal settings.
+  local function lavenderConnectorAt(tx, ty)
     return lavenderRoute10 and ty >= th - 12
   end
 
@@ -1718,6 +1713,33 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
          grassShades(x0, z0, shade))
   end
 
+  local function lavenderGroundShades(x0, z0, shade)
+    local corners = {
+      { x0, z0 }, { x0 + 8, z0 },
+      { x0 + 8, z0 + 8 }, { x0, z0 + 8 },
+    }
+    local out = {}
+    for i, corner in ipairs(corners) do
+      local base = type(shade) == "table" and shade[i] or shade
+      -- Broad fields cross source-tile boundaries so the Legendary treatment
+      -- reads as one weathered lavender/charcoal town surface rather than an
+      -- 8px checkerboard. The atlas provides only sparse stone/earth flecks.
+      local broad = smoothPathNoise(corner[1] * 0.70, corner[2] * 0.70, 1111)
+      local drift = smoothPathNoise(corner[1] * 0.36, corner[2] * 0.36, 1117)
+      out[i] = base * (0.955 + broad * 0.055 + drift * 0.025)
+    end
+    return out
+  end
+
+  local function lavenderGroundTop(tx, ty, x0, z0, h, shade)
+    local x1, z1 = x0 + 8, z0 + 8
+    local variant = math.floor(rockNoise(tx, ty, 1111) * 4)
+    push({ { x0, h, z0 }, { x1, h, z0 },
+           { x1, h, z1 }, { x0, h, z1 } },
+         pavedUV(KANTO_PATH_SWATCH_TILE, variant),
+         lavenderGroundShades(x0, z0, shade))
+  end
+
   local function woodRect(axis, across0, across1, along0, along1, y)
     if axis == "z" then
       return { { across0, y, along0 }, { across1, y, along0 },
@@ -2494,11 +2516,18 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
                             1, g, g == 34 and "healing" or false)
           elseif caveKind then
             caveNaturalTop(tx, ty, tx * 8, ty * 8, 0, 1, caveKind)
-          elseif lavenderLawnAt(tx, ty) then
-            -- Exact Pallet/Battle-Art lawn donor. Do not key this on the
-            -- synthesized floor tile: Tower/sign/building claims can inherit
-            -- another donor and otherwise leave isolated bald/grey squares.
-            topQuad(tx * 8, ty * 8, 0, KANTO_GRASS_TILE, 1)
+          elseif lavenderGround then
+            -- CITY GROUND deliberately owns every synthesized Lavender floor,
+            -- including Tower/sign/building claims that inherit odd donors.
+            if lavenderLegendaryGround then
+              lavenderGroundTop(tx, ty, tx * 8, ty * 8, 0,
+                                aoShades(tx, ty, 0, 1))
+            else
+              -- Battle Art matches the broad neutral Route 8/12 connector.
+              topQuad(tx * 8, ty * 8, 0, KANTO_CONNECTOR_GROUND_TILE, 1)
+            end
+          elseif lavenderConnectorAt(tx, ty) then
+            topQuad(tx * 8, ty * 8, 0, KANTO_CONNECTOR_GROUND_TILE, 1)
           elseif isKantoCourtyardAt(tx, ty, g) then
             kantoCourtyardTop(tx, ty, tx * 8, ty * 8, 0,
                              aoShades(tx, ty, 0, 1))
@@ -2668,11 +2697,17 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           elseif viridianForest and s.class == "ground" then
             forestGroundTop(tx, ty, x0, z0, h, topTile,
                             s.art == "upright" and VOLUME_TOP_SHADE or 1)
-          elseif lavenderLawnAt(tx, ty) and s.class == "ground" then
-            -- Reuse Pallet Town's normal $2C source tile directly. This is not
-            -- Legendary GRASS_ART: the sparse authored dash pattern and normal
-            -- map palette remain intact, while checker/path donors disappear.
-            topQuad(x0, z0, h, KANTO_GRASS_TILE, 1)
+          elseif lavenderGround and s.class == "ground" then
+            if lavenderLegendaryGround then
+              lavenderGroundTop(tx, ty, x0, z0, h,
+                                aoShades(tx, ty, h, 1))
+            else
+              -- Battle Art uses the exact raw $23 connector donor rather than
+              -- bright $2C grass or the old authored gray/green alternation.
+              topQuad(x0, z0, h, KANTO_CONNECTOR_GROUND_TILE, 1)
+            end
+          elseif lavenderConnectorAt(tx, ty) and s.class == "ground" then
+            topQuad(x0, z0, h, KANTO_CONNECTOR_GROUND_TILE, 1)
           elseif isKantoCourtyardAt(tx, ty) and s.flat then
             kantoCourtyardTop(tx, ty, x0, z0, h,
                              aoShades(tx, ty, h, 1))

@@ -459,6 +459,13 @@ local GRASS_ART = {
   "BBSSBBLB", "BSLLSBBB", "SSBLLBBS", "BLBSSSBB",
   "BBSSBLBB", "SBBLSSLB", "BLSBBBSS", "SSBBLSBB",
 }
+-- Lavender Legendary ground is intentionally quiet: a mostly continuous
+-- smoky body with sparse charcoal/mauve flecks. ChunkMesher rotates this donor
+-- and adds low-frequency world-space shading so the 8px source grid disappears.
+local LAVENDER_GROUND_ART = {
+  "BBBBBBBB", "BBBBBSBB", "BBBBBBBB", "BBLBBBBB",
+  "BBBBBBBB", "BBBBBBBB", "BBBBDBBB", "BBBBBBBB",
+}
 -- TEST115 Pokemon Tower. ChunkMesher now supplies continuous world-space
 -- granite, so this donor is deliberately quiet and cannot announce the 8px
 -- source grid if a fallback face ever samples the whole tile.
@@ -568,6 +575,10 @@ local GRASS = {
   dark={.17,.35,.12,1}, shadow={.22,.43,.16,1},
   body={.27,.50,.20,1}, light={.33,.57,.26,1},
 }
+local LAVENDER_GROUND = {
+  dark={.105,.095,.135,1}, shadow={.155,.140,.185,1},
+  body={.235,.205,.255,1}, light={.330,.295,.345,1},
+}
 local TOWER_FLOOR = {
   dark={.135,.135,.150,1}, shadow={.205,.205,.220,1},
   body={.305,.305,.320,1}, light={.410,.405,.420,1},
@@ -645,18 +656,16 @@ local function communityAtlas(map, colors, base, baked)
   local cave = tilesetId == "CAVERN"
   local cityGroundMap = CommunityVisuals.isCityGroundMap(map)
   local legendaryCityGround = cityGroundMap and CommunityVisuals.customCityGround()
+  local lavenderGround = legendaryCityGround and mapId == "LAVENDER_TOWN"
   local fuchsiaGround = legendaryCityGround and mapId == "FUCHSIA_CITY"
   -- GRASS remains the broad route/Overworld control. The two city maps use
   -- CITY GROUND instead, so choosing Legendary grass cannot force their turf.
-  -- Route 10 keeps its source $2C lawn as well; only ChunkMesher's final
-  -- twelve-row seam redirects its other flat ground donors to that tile.
-  local grassEnabled = (not cityGroundMap and mapId ~= "ROUTE_10"
-      and CommunityVisuals.customGrass())
+  local grassEnabled = (not cityGroundMap and CommunityVisuals.customGrass())
     or fuchsiaGround
   local towerInterior = tilesetId == "CEMETERY"
     and mapId:match("^POKEMON_TOWER_[1-7]F$") ~= nil
     and CommunityVisuals.customTower()
-  local overworldEnabled = grassEnabled
+  local overworldEnabled = grassEnabled or lavenderGround
     or CommunityVisuals.customRoads() or CommunityVisuals.customWalls()
     or CommunityVisuals.customCourtyards()
   local forestEnabled = tilesetId == "FOREST"
@@ -822,9 +831,15 @@ local function communityAtlas(map, colors, base, baked)
       end
     end
 
-    -- Lavender deliberately does NOT paint tile $2C with GRASS_ART here.
-    -- ChunkMesher redirects every flat Lavender top to the untouched source
-    -- $2C donor, which is the sparse Pallet/Battle-Art lawn the user selected.
+    if lavenderGround then
+      -- CITY GROUND -> LEGENDARY VISUALS deliberately owns the old path/turf
+      -- donors after the generic road/grass passes. Every flat Lavender top is
+      -- routed through this family by ChunkMesher, so source checker structure
+      -- cannot reappear while side/fallback samples remain tonally coherent.
+      paint(35, LAVENDER_GROUND_ART, LAVENDER_GROUND)
+      paint(44, LAVENDER_GROUND_ART, LAVENDER_GROUND)
+      paint(57, LAVENDER_GROUND_ART, LAVENDER_GROUND)
+    end
 
     if towerInterior then
       local okRaw, raw = pcall(Assets.imageData, map.tileset.image)

@@ -530,12 +530,9 @@ function Disk.fingerprint(map, slot, masks, kind)
   local cityGroundMap = CommunityVisuals.isCityGroundMap(map)
   -- CITY GROUND fully owns Lavender/Fuchsia turf. The broad GRASS row is not
   -- a geometry/material input there, so do not create redundant city cache
-  -- variants when a player changes route grass independently. Route 10 is the
-  -- same exception because its sparse source lawn is fixed for the Lavender
-  -- boundary even when global GRASS is Legendary.
-  if not cityGroundMap and mapId ~= "ROUTE_10" then
-    parts[#parts + 1] = CommunityVisuals.grass:get()
-  end
+  -- variants when a player changes route grass independently. Route 10 is not
+  -- a city map: outside the fixed Lavender seam it still follows GRASS.
+  if not cityGroundMap then parts[#parts + 1] = CommunityVisuals.grass:get() end
   if kind == "aux" then
     -- TEST138 removes only exposed east tile-boundary caps while preserving
     -- every camera-safe interior cap and crossed centre card. Force a clean
@@ -545,20 +542,17 @@ function Disk.fingerprint(map, slot, masks, kind)
   end
   parts[#parts + 1] = CommunityVisuals.roads:get()
   if cityGroundMap then
-    parts[#parts + 1] = "city-ground-option-v2"
+    parts[#parts + 1] = "city-ground-option-v3"
+    parts[#parts + 1] = CommunityVisuals.cityGround:get()
     if mapId == "LAVENDER_TOWN" then
-      -- Both CITY GROUND choices intentionally resolve to the same sparse
-      -- Pallet/Battle-Art $2C lawn. The fixed token invalidates the worker
-      -- build that used dense Legendary grass only in LEGENDARY mode.
-      parts[#parts + 1] = "lavender-pallet-source-lawn-v2"
-    else
-      parts[#parts + 1] = CommunityVisuals.cityGround:get()
+      parts[#parts + 1] = "lavender-battle-connector-legendary-smoky-v1"
     end
   end
   -- Route 10's final twelve tile rows are Lavender's loaded north neighbour.
-  -- Their material is fixed, not a CITY GROUND setting dependency.
+  -- Their neutral connector material is fixed, but the rest of Route 10 keeps
+  -- normal GRASS ownership, so only the contract token is special here.
   if mapId == "ROUTE_10" then
-    parts[#parts + 1] = "lavender-route10-source-lawn-strip-v2"
+    parts[#parts + 1] = "lavender-route10-connector-strip-v3"
   end
   if mapId:match("^POKEMON_TOWER_[1-7]F$") then
     parts[#parts + 1] = "pokemon-tower-stone-v14-master-wall-blue-void"

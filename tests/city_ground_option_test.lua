@@ -141,31 +141,39 @@ local palletBattle, palletN = signature('PALLET_TOWN', false, false)
 local palletGrass, palletGrassN = signature('PALLET_TOWN', false, true)
 check(palletN == palletGrassN and not same(palletBattle, palletGrass),
   'GRASS still controls ordinary Overworld turf outside the two city maps')
-check(lavenderN == palletN and same(lavenderBattle, palletBattle),
-  'Lavender CITY GROUND Battle Art uses the exact Pallet Battle-Art lawn top')
-check(lavenderLegendaryN == palletN and same(lavenderLegendary, palletBattle),
-  'Lavender CITY GROUND Legendary also uses the sparse Pallet Battle-Art lawn, not full grass')
+local connectorBattle, connectorN = signature('ROUTE_8', false, false, 35)
+check(lavenderN == connectorN and same(lavenderBattle, connectorBattle),
+  'Lavender CITY GROUND Battle Art uses the raw Route 8/12 connector donor')
+check(lavenderLegendaryN == lavenderN and not same(lavenderLegendary, lavenderBattle)
+    and not same(lavenderLegendary, palletGrass),
+  'Lavender CITY GROUND Legendary is a distinct smoky ground treatment')
 for _, tile in ipairs({35, 57, 90}) do
-  local variant, n = signature('LAVENDER_TOWN', false, false, tile)
-  check(n == lavenderLegendaryN and same(variant, lavenderLegendary),
-    'Lavender flat source tile '..tile..' cannot fall back to checker/grey ground')
+  local battleVariant, battleN = signature('LAVENDER_TOWN', false, false, tile)
+  local legendaryVariant, legendaryN = signature('LAVENDER_TOWN', true, false, tile)
+  check(battleN == lavenderN and same(battleVariant, lavenderBattle),
+    'Lavender Battle Art flat source tile '..tile..' resolves to connector ground')
+  check(legendaryN == lavenderLegendaryN and same(legendaryVariant, lavenderLegendary),
+    'Lavender Legendary flat source tile '..tile..' resolves to one smoky family')
 end
 local claimedLavender, claimedLavenderN = signature('LAVENDER_TOWN', false, false, 90, true)
-check(claimedLavenderN == lavenderLegendaryN and same(claimedLavender, lavenderLegendary),
-  'Lavender synthesized ground under a claimed prop/building uses Pallet light grass')
+local claimedLavenderLegendary, claimedLavenderLegendaryN = signature('LAVENDER_TOWN', true, false, 90, true)
+check(claimedLavenderN == lavenderN and same(claimedLavender, lavenderBattle),
+  'Lavender Battle Art synthesized ground under props uses connector ground')
+check(claimedLavenderLegendaryN == lavenderLegendaryN
+    and same(claimedLavenderLegendary, lavenderLegendary),
+  'Lavender Legendary synthesized ground under props uses smoky ground')
 local route10South, route10SouthN = signature('ROUTE_10', false, false, 90, false, 143, 36)
 local route10SouthLegendary, route10SouthLegendaryN = signature('ROUTE_10', true, false, 57, false, 143, 36)
-check(route10SouthN == palletN and same(route10South, palletBattle)
-    and route10SouthLegendaryN == palletN and same(route10SouthLegendary, palletBattle),
-  'Route 10 final twelve rows use the same sparse Pallet lawn in both CITY GROUND modes')
+check(route10SouthN == connectorN and same(route10South, connectorBattle)
+    and route10SouthLegendaryN == connectorN and same(route10SouthLegendary, connectorBattle),
+  'Route 10 final twelve rows stay on neutral connector ground in both CITY GROUND modes')
 local route10Interior = signature('ROUTE_10', false, false, 57, false, 100, 36)
-check(not same(route10Interior, palletBattle),
+check(not same(route10Interior, connectorBattle),
   'Route 10 interior terrain outside the Lavender seam keeps its authored donor')
 local route10InteriorGrass = signature('ROUTE_10', false, true, 44, false, 100, 36)
 local route10InteriorBattle = signature('ROUTE_10', false, false, 44, false, 100, 36)
-check(same(route10InteriorGrass, route10InteriorBattle)
-    and same(route10InteriorBattle, palletBattle),
-  'Route 10 ordinary grass keeps the sparse Pallet source donor even when global GRASS is Legendary')
+check(not same(route10InteriorGrass, route10InteriorBattle),
+  'Route 10 interior grass remains controlled by the broad GRASS setting')
 
 local Disk = assert(loadfile('lib/VoxelMeshDisk.lua'))({
   require = function(name)
@@ -198,13 +206,13 @@ check(fuchsiaCache ~= fingerprint('FUCHSIA_CITY', true, false),
 local lavenderCache = fingerprint('LAVENDER_TOWN', false, false)
 check(lavenderCache == fingerprint('LAVENDER_TOWN', false, true),
   'Lavender cache identity ignores unrelated GRASS changes')
-check(lavenderCache == fingerprint('LAVENDER_TOWN', true, false),
-  'Lavender CITY GROUND modes share the fixed Pallet lawn mesh identity')
+check(lavenderCache ~= fingerprint('LAVENDER_TOWN', true, false),
+  'Lavender CITY GROUND modes have distinct persistent mesh identities')
 local route10Cache = fingerprint('ROUTE_10', false, false)
 check(route10Cache == fingerprint('ROUTE_10', true, false),
   'Route 10 Lavender seam is not a CITY GROUND cache dependency')
-check(route10Cache == fingerprint('ROUTE_10', false, true),
-  'Route 10 sparse source lawn is not a global GRASS cache dependency')
+check(route10Cache ~= fingerprint('ROUTE_10', false, true),
+  'Route 10 interior terrain remains a global GRASS cache dependency')
 local palletCache = fingerprint('PALLET_TOWN', false, false)
 check(palletCache == fingerprint('PALLET_TOWN', true, false),
   'CITY GROUND does not invalidate unrelated Overworld maps')
@@ -258,8 +266,14 @@ check(fuchsiaAnimated and fuchsiaAnimated.id == 'FUCHSIA_CITY'
 check(TerrainAtlas.animate(animatedMap('FUCHSIA_CITY'), nil, {}, false) == fuchsiaAnimated
     and built == 2,
   'revisiting a city reuses only its own animated atlas')
+Community.cityGround.value = 'n64memory'
+local lavenderLegendaryAnimated = TerrainAtlas.animate(animatedMap('LAVENDER_TOWN'), nil, {}, false)
+check(lavenderLegendaryAnimated and lavenderLegendaryAnimated ~= lavenderAnimated
+    and built == 3,
+  'Lavender Battle Art and Legendary modes cannot reuse the same animated atlas')
+Community.cityGround.value = 'default'
 local routeAnimated = TerrainAtlas.animate(animatedMap('ROUTE_1'), nil, {}, false)
 local routeShared = TerrainAtlas.animate(animatedMap('ROUTE_2'), nil, {}, false)
-check(routeAnimated == routeShared and built == 3,
+check(routeAnimated == routeShared and built == 4,
   'ordinary OVERWORLD maps retain the bounded shared animated cache')
 print(checks .. ' checks passed (city ground option)')
