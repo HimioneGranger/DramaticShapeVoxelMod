@@ -526,7 +526,11 @@ function Disk.fingerprint(map, slot, masks, kind)
       parts[#parts + 1] = tostring(sign.text)
     end
   end
-  parts[#parts + 1] = CommunityVisuals.grass:get()
+  local cityGroundMap = CommunityVisuals.isCityGroundMap(map)
+  -- CITY GROUND fully owns Lavender/Fuchsia turf. The broad GRASS row is not
+  -- a geometry/material input there, so do not create redundant city cache
+  -- variants when a player changes route grass independently.
+  if not cityGroundMap then parts[#parts + 1] = CommunityVisuals.grass:get() end
   if kind == "aux" then
     -- TEST138 removes only exposed east tile-boundary caps while preserving
     -- every camera-safe interior cap and crossed centre card. Force a clean
@@ -536,9 +540,17 @@ function Disk.fingerprint(map, slot, masks, kind)
   end
   parts[#parts + 1] = CommunityVisuals.roads:get()
   local mapId = tostring(map.id or ""):upper()
-  if mapId == "LAVENDER_TOWN" then
-    parts[#parts + 1] = "lavender-charcoal-purple-ground-v2"
-  elseif mapId:match("^POKEMON_TOWER_[1-7]F$") then
+  if cityGroundMap then
+    -- Issue #54: city ground has its own option and therefore its own cache
+    -- identity. The contract token invalidates pre-option meshes, where
+    -- Lavender was unconditional and Fuchsia followed the global GRASS row.
+    parts[#parts + 1] = "city-ground-option-v1"
+    parts[#parts + 1] = CommunityVisuals.cityGround:get()
+    if mapId == "LAVENDER_TOWN" and CommunityVisuals.customCityGround() then
+      parts[#parts + 1] = "lavender-charcoal-purple-ground-v2"
+    end
+  end
+  if mapId:match("^POKEMON_TOWER_[1-7]F$") then
     parts[#parts + 1] = "pokemon-tower-stone-v14-master-wall-blue-void"
     parts[#parts + 1] = CommunityVisuals.tower:get()
     parts[#parts + 1] = CommunityVisuals.towerWallStyle()

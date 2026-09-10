@@ -8,6 +8,11 @@ local ModSetting = V.require("ModSetting")
 
 local CommunityVisuals = {}
 
+local CITY_GROUND_MAPS = {
+  LAVENDER_TOWN = true,
+  FUCHSIA_CITY = true,
+}
+
 CommunityVisuals.pillars = ModSetting.new(
   "communityPillars", "LEGENDARY PILLARS",
   { "default", "separate", "bottom", "top" },
@@ -94,6 +99,14 @@ CommunityVisuals.grass = ModSetting.new(
   { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }
 )
 
+-- City turf is intentionally separate from route/encounter grass. Lavender
+-- and Fuchsia have strong authored palette/ground identities, so opting into
+-- Legendary grass elsewhere must not silently replace their tileset ground.
+CommunityVisuals.cityGround = ModSetting.new(
+  "communityCityGround", "CITY GROUND",
+  { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }
+)
+
 CommunityVisuals.roads = ModSetting.new(
   "communityRoads", "ROADS & BRIDGES",
   { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }
@@ -131,6 +144,7 @@ CommunityVisuals.settings = {
   CommunityVisuals.treeDetail,
   CommunityVisuals.cutTrees,
   CommunityVisuals.signs,
+  CommunityVisuals.cityGround,
   CommunityVisuals.grass,
   CommunityVisuals.roads,
   CommunityVisuals.walls,
@@ -214,6 +228,15 @@ end
 
 function CommunityVisuals.customGrass()
   return CommunityVisuals.grass:get() == "n64memory"
+end
+
+function CommunityVisuals.customCityGround()
+  return CommunityVisuals.cityGround:get() == "n64memory"
+end
+
+function CommunityVisuals.isCityGroundMap(map)
+  return map and map.tileset and map.tileset.id == "OVERWORLD"
+    and CITY_GROUND_MAPS[tostring(map.id or ""):upper()] == true
 end
 
 
