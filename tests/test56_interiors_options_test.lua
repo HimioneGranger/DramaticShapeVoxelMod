@@ -19,6 +19,7 @@ function V.require(name)
 end
 local C = assert(loadfile('lib/CommunityVisuals.lua'))(V)
 modules.CommunityVisuals = C
+modules.TowerGarden = assert(loadfile('lib/TowerGarden.lua'))(V)
 for _, name in ipairs({'GameCorner','PrizeRoom','UndergroundRoom','RocketRoom','LegendaryGarden'}) do
   modules[name] = assert(loadfile('lib/'..name..'.lua'))(V)
 end
@@ -49,6 +50,17 @@ package.loaded['src.core.Version']={engine='0.2.53'}
 check(gate(),'0.2.53 gets the nested menu')
 package.loaded['src.core.Version']={engine='0.2.36'}
 check(not gate(),'older engines retain the flat menu')
+
+-- Route 10's new Tower garden belongs to CITY GROUND, not the broad GRASS
+-- switch. A player may opt into Legendary route grass while deliberately
+-- retaining the protected Battle Art Lavender/Route 10 city-ground baseline.
+C.cityGround.index=1;C.grass.index=2
+check(not modules.TowerGarden.enabled(),
+  'Legendary GRASS alone does not enable the Route 10 Tower garden')
+C.cityGround.index=2;C.grass.index=1
+check(modules.TowerGarden.enabled(),
+  'Legendary CITY GROUND enables the Route 10 Tower garden')
+C.cityGround.index=1;C.grass.index=1
 
 for _,name in ipairs({'casino','prizeRoom','tunnels','rocket','elevator'})do
   local s=C[name]

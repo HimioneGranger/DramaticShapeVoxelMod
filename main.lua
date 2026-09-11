@@ -868,7 +868,8 @@ local SETTINGS = {
     end, full = true },
   { PokeballSettings.preset,
     "Choose a coordinated capture-effects profile. CUSTOM exposes the "
-    .. "individual beam, streamer and star controls below.",
+    .. "individual beam and streamer controls below. The successful-capture "
+    .. "star burst uses Ember Legacy's fixed q58 choreography.",
     when = function()
       return stagedBattles() and PokeballSettings.active()
     end, full = true },

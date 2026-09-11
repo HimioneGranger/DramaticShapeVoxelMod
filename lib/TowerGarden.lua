@@ -2,7 +2,10 @@ local V=...
 local CV=V.require('CommunityVisuals')
 local M={}
 function M.enabled()
-  return CV.customCityGround() or CV.customGrass()
+  -- The Route 10 Tower garden is part of Lavender's CITY GROUND treatment.
+  -- GRASS may recolor the surrounding route, but must never opt a Battle Art
+  -- city-ground selection into Legendary garden geometry by itself.
+  return CV.customCityGround()
 end
 -- Original Route 10 tower roof is exactly this 3x3 block pattern.
 -- Match map blocks, not reskinned atlas IDs or building-template order.
