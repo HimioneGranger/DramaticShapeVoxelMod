@@ -20,3 +20,4 @@ assets/world-fill/rockycave.png
 
 # Local Legendary media; supplied separately from source.
 assets/legendary/**
+*.ogg
