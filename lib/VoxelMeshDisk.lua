@@ -5,11 +5,12 @@
 -- save directory, then upload them cooperatively next session instead of
 -- rerunning Structures and the terrain carve.
 --
--- Every read fails open. Missing, truncated, corrupt, or fingerprint-mismatched
--- files are removed and the ordinary mesher rebuilds them. No user setting or
--- cache id is exposed; CACHE_REVISION is the format/geometry contract and must
--- be bumped whenever emitted vertices change in a way the fingerprint cannot
--- observe directly.
+-- Every read fails open. Missing, truncated, corrupt, or version-incompatible
+-- files are ignored and the ordinary mesher rebuilds them. Geometry/config
+-- identity lives in the cache path, while the fixed BAVC header only owns the
+-- binary stream format and CACHE_REVISION. Old FORMAT 2 files keep their exact
+-- embedded fingerprint as a read-only migration guard so an existing world
+-- precache can be reused without letting a different visual variant borrow it.
 
 local V = ...
 local traceOK, CacheTrace = pcall(V.require, "CacheTrace")
@@ -100,7 +101,10 @@ local LEGACY_ROOT =
   "mod-derived/BATTLE_ART_VOXEL_FORK/static-mesh-cache-v2"
 
 local MAGIC = "BAVC"
-local FORMAT = 2
+local LEGACY_FORMAT = 2
+local FORMAT = 3
+local VARIANT_PREFIX = "variant-"
+local VARIANT_PATTERN = "variant%-%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x%x"
 local RAW_CHUNK = 1024 * 1024
 
 local function available()
@@ -204,35 +208,57 @@ local function legacyName(key)
   local prefix = LOGICAL_DIRECTORY .. "/"
   if key:sub(1, #prefix) ~= prefix then return nil end
   local tail = key:sub(#prefix + 1)
-  local id, product = tail:match("^([^/]+)/(.+)$")
+  local id, product, variant = tail:match("^([^/]+)/([^/]+)/([^/]+)$")
+  if not id then id, product = tail:match("^([^/]+)/([^/]+)$") end
   if not id then return nil end
+  if variant and not variant:match("^" .. VARIANT_PATTERN .. "$") then
+    return nil
+  end
+  local variantSuffix = variant and ("." .. variant) or ""
   -- The aux payload was renamed to "deco" on disk (Windows reserved-name fix,
   -- 1.7.4/potato_voxel), but the legacy FFI filesystem still stores it as
   -- ".aux.bavc". Accept both so legacy engines (<= 0.1.83) can read AND write
   -- the aux segment instead of failing on an unknown "deco" product.
   if product == "aux" or product == "deco" then
-    return LEGACY_ROOT .. "/" .. id .. ".aux.bavc"
+    return LEGACY_ROOT .. "/" .. id .. ".aux" .. variantSuffix .. ".bavc"
   end
   if product == "full-terrain" then
-    return LEGACY_ROOT .. "/" .. id .. ".full.terrain.bavc"
+    return LEGACY_ROOT .. "/" .. id .. ".full.terrain" .. variantSuffix .. ".bavc"
   end
   if product == "body-terrain" then
-    return LEGACY_ROOT .. "/" .. id .. ".body.terrain.bavc"
+    return LEGACY_ROOT .. "/" .. id .. ".body.terrain" .. variantSuffix .. ".bavc"
   end
   if product:match("^tree%-%w[%w_-]*%-%w[%w_-]*$") then
-    return LEGACY_ROOT .. "/" .. id .. "." .. product .. ".bavc"
+    return LEGACY_ROOT .. "/" .. id .. "." .. product .. variantSuffix .. ".bavc"
   end
   return nil
 end
 
 local function legacyKey(name)
-  local id = name:match("^(.-)%.aux%.bavc$")
+  local id, variant = name:match("^(.-)%.aux%.(" .. VARIANT_PATTERN .. ")%.bavc$")
+  if id and #variant == #VARIANT_PREFIX + 16 then
+    return LOGICAL_DIRECTORY .. "/" .. id .. "/deco/" .. variant
+  end
+  id, variant = name:match("^(.-)%.full%.terrain%.(" .. VARIANT_PATTERN .. ")%.bavc$")
+  if id and #variant == #VARIANT_PREFIX + 16 then
+    return LOGICAL_DIRECTORY .. "/" .. id .. "/full-terrain/" .. variant
+  end
+  id, variant = name:match("^(.-)%.body%.terrain%.(" .. VARIANT_PATTERN .. ")%.bavc$")
+  if id and #variant == #VARIANT_PREFIX + 16 then
+    return LOGICAL_DIRECTORY .. "/" .. id .. "/body-terrain/" .. variant
+  end
+  local treeId, product, treeVariant = name:match(
+    "^(.-)%.(tree%-%w[%w_-]*%-%w[%w_-]*)%.(" .. VARIANT_PATTERN .. ")%.bavc$")
+  if treeId and product and treeVariant and #treeVariant == #VARIANT_PREFIX + 16 then
+    return LOGICAL_DIRECTORY .. "/" .. treeId .. "/" .. product .. "/" .. treeVariant
+  end
+  id = name:match("^(.-)%.aux%.bavc$")
   if id then return LOGICAL_DIRECTORY .. "/" .. id .. "/deco" end
   id = name:match("^(.-)%.full%.terrain%.bavc$")
   if id then return LOGICAL_DIRECTORY .. "/" .. id .. "/full-terrain" end
   id = name:match("^(.-)%.body%.terrain%.bavc$")
   if id then return LOGICAL_DIRECTORY .. "/" .. id .. "/body-terrain" end
-  local treeId, product = name:match("^(.-)%.(tree%-.+)%.bavc$")
+  treeId, product = name:match("^(.-)%.(tree%-.+)%.bavc$")
   if treeId and product then
     return LOGICAL_DIRECTORY .. "/" .. treeId .. "/" .. product
   end
@@ -300,7 +326,7 @@ end
 local function mergeLegacyReads(primary)
   local legacy = legacyStorage(true)
   if not legacy then return primary end
-  return {
+  local merged = {
     list = function(_, prefix)
       local out, seen = {}, {}
       for _, source in ipairs({ primary, legacy }) do
@@ -323,6 +349,10 @@ local function mergeLegacyReads(primary)
       return primary:writeBytes(key, bytes)
     end,
   }
+  if type(primary.delete) == "function" then
+    merged.delete = function(_, key) return primary:delete(key) end
+  end
+  return merged
 end
 
 -- Forward-declared because bindStorage performs the probe. Without this local
@@ -349,13 +379,17 @@ local function bindStorage(game)
   end
   backendKind = "storage-bytes"
   Disk.DIRECTORY = LOGICAL_DIRECTORY
-  storage = mergeLegacyReads({
+  local primary = {
     list = function(_, prefix) return api:list(scope, prefix) end,
     readBytes = function(_, key) return api:readBytes(scope, key) end,
     writeBytes = function(_, key, bytes)
       return api:writeBytes(scope, key, bytes)
     end,
-  })
+  }
+  if type(api.delete) == "function" then
+    primary.delete = function(_, key) return api:delete(scope, key) end
+  end
+  storage = mergeLegacyReads(primary)
   -- Self-test the write path. Some engine builds (observed on 0.2.x storage
   -- backend) accept writeBytes but never persist the bytes: the directory is
   -- created yet the file body is dropped, so every later launch sees an empty
@@ -381,13 +415,20 @@ storageRoundTrips = function(store, scope, api)
   -- implementations where writing "" is the only available invalidation.
   local probe = "cache/__bind_probe"
   local sentinel = "BAVCbind" .. tostring(os and os.clock and os.clock() or 0)
+  local function clearProbe()
+    if type(store.delete) == "function" then
+      local ok, did = pcall(store.delete, store, probe)
+      if ok and did == true then return end
+    end
+    pcall(store.writeBytes, store, probe, "")
+  end
   local ok, wrote = pcall(store.writeBytes, store, probe, sentinel)
   if not ok or wrote ~= true then
-    pcall(store.writeBytes, store, probe, "")
+    clearProbe()
     return false
   end
   local rok, got = pcall(store.readBytes, store, probe)
-  pcall(store.writeBytes, store, probe, "")
+  clearProbe()
   if not rok or got ~= sentinel then return false end
   return true
 end
@@ -631,10 +672,63 @@ local function kindSegment(kind)
   return kind == "aux" and "deco" or kind
 end
 
-local function pathFor(map, slot, kind)
+-- Stable 64-bit textual identity for one canonical geometry fingerprint.
+-- Two pure-arithmetic FNV-1a lanes avoid depending on love.data.hash/bit ops,
+-- which are intentionally absent from several supported headless/test builds.
+-- This is a lookup key, not a corruption checksum: the fixed BAVC header below
+-- owns stream compatibility and the body parser still owns structural safety.
+local HASH_PRIME = 16777619
+local HASH_LANE_A, HASH_LANE_B = 2166136261, 2654435769
+local XOR4 = {}
+for a = 0, 15 do
+  XOR4[a] = {}
+  for b = 0, 15 do
+    local x, y, r = a, b, 0
+    for place = 0, 3 do
+      if x % 2 ~= y % 2 then r = r + 2 ^ place end
+      x, y = math.floor(x / 2), math.floor(y / 2)
+    end
+    XOR4[a][b] = r
+  end
+end
+
+local function xor8(a, b)
+  return XOR4[math.floor(a / 16)][math.floor(b / 16)] * 16
+       + XOR4[a % 16][b % 16]
+end
+
+local function hashStep(h, byte)
+  local lo = h % 65536
+  local hi = (h - lo) / 65536
+  lo = lo - lo % 256 + xor8(lo % 256, byte)
+  return (lo * HASH_PRIME + (hi * HASH_PRIME % 65536) * 65536) % 4294967296
+end
+
+local function variantId(fp)
+  local a, b = HASH_LANE_A, HASH_LANE_B
+  fp = tostring(fp or "")
+  for i = 1, #fp do
+    local byte = fp:byte(i)
+    a = hashStep(a, byte)
+    b = hashStep(b, byte)
+  end
+  return ("%08x%08x"):format(a, b)
+end
+
+Disk.variantId = variantId
+
+local function basePathFor(map, slot, kind)
   local suffix = kind == "aux" and kindSegment(kind)
                  or (tostring(slot) .. "-terrain")
   return Disk.DIRECTORY .. "/" .. safeId(map.id) .. "/" .. suffix
+end
+
+local function variantPath(base, fp)
+  return base .. "/" .. VARIANT_PREFIX .. variantId(fp)
+end
+
+local function pathFor(map, slot, kind, fp)
+  return variantPath(basePathFor(map, slot, kind), fp)
 end
 
 -- TEST97 persists the already-expanded mature-tree triangle streams beside
@@ -642,7 +736,7 @@ end
 -- its own path: a map's FULL owner can suppress trees beneath connected map
 -- bodies while the same map drawn as a neighbour must keep its complete body.
 local TREE_MATERIALS = { "trunks", "stones", "hoods", "detail", "shadows" }
-local function treePath(map, recipe, signature)
+local function treeBasePath(map, recipe, signature)
   return Disk.DIRECTORY .. "/" .. safeId(map.id) .. "/tree-"
          .. safeId(recipe) .. "-" .. safeId(signature)
 end
@@ -651,6 +745,10 @@ local function treeFingerprint(map, recipe, signature)
   return Disk.fingerprint(map, "body", nil, "trees")
          .. "|tree-stream-v2-sections-lod|recipe|" .. tostring(recipe)
          .. "|placement|" .. tostring(signature)
+end
+
+local function treePath(map, recipe, signature, fp)
+  return variantPath(treeBasePath(map, recipe, signature), fp)
 end
 
 local function physicalPath(path)
@@ -688,8 +786,16 @@ local function discard(path, rejected)
   if rejected then ramRejected[path] = true end
 end
 
-local function header(fp)
-  return MAGIC .. u32(FORMAT) .. u32(#fp) .. fp
+local function rejectBody(map, path, detail)
+  detail = tostring(detail or "malformed BAVC payload")
+  CacheTrace.log("reject-cache-body", map and map.id, path .. " " .. detail)
+  StaticGeometry.record(map and map.id, "cache.record", path, detail)
+  discard(path, true)
+  return nil
+end
+
+local function header()
+  return MAGIC .. u32(FORMAT) .. u32(Disk.CACHE_REVISION)
 end
 
 -- CONTINUE may preload the compressed BAVC containers. They remain compressed
@@ -706,7 +812,9 @@ function Disk.orderRamNames(names, priority)
   local prefix = Disk.DIRECTORY .. "/"
   local function parts(path)
     local tail = path:sub(1, #prefix) == prefix and path:sub(#prefix + 1) or ""
-    local id, product = tail:match("^([^/]+)/(.+)$")
+    -- FORMAT 3 adds /variant-<digest> after the readable product. Priority is
+    -- still a property of map/product, never of which visual variant it is.
+    local id, product = tail:match("^([^/]+)/([^/]+)")
     local mapRank = rank[id] or math.huge
     local current = mapRank == 1
     local phase
@@ -743,8 +851,27 @@ function Disk.ramPlan(priority)
   local names, bytes = {}, 0
   local ok, listed = pcall(storage.list, storage, Disk.DIRECTORY)
   if not ok then return names, bytes end
+  -- A path hash identifies the exact geometry variant, but the title screen
+  -- intentionally does not load/instantiate every map merely to recompute all
+  -- active hashes. If one map/product has multiple retained variants (for
+  -- example OFF and FULL, or an older cache revision), preloading an arbitrary
+  -- lexical one would waste the finite RAM budget and FULL would multiply RAM
+  -- use indefinitely. Preload only unambiguous groups; ambiguous groups stay on
+  -- disk until gameplay requests its exact variant, which is then retained in
+  -- the ordinary session RAM mirror.
+  local groups = {}
   for _, key in ipairs(listed or {}) do
     if key:sub(1, #Disk.DIRECTORY + 1) == Disk.DIRECTORY .. "/" then
+      local base = key:match("^(.-)/" .. VARIANT_PATTERN .. "$")
+                   or key
+      local group = groups[base]
+      if not group then group = {}; groups[base] = group end
+      group[#group + 1] = key
+    end
+  end
+  for _, group in pairs(groups) do
+    if #group == 1 then
+      local key = group[1]
       names[#names + 1] = key
       local held = ramFiles[key]
       bytes = bytes + (held and #held or knownSizes[key] or 0)
@@ -852,29 +979,73 @@ local function fingerprintDifference(actual, expected)
   return "fingerprint differs"
 end
 
-local function reportMismatch(map, path, actual, expected, detail)
-  CacheTrace.log("reject-fingerprint", map and map.id, path .. " " .. (detail or fingerprintDifference(actual, expected)))
-  StaticGeometry.record(map and map.id, "cache.record", path,
-    detail or fingerprintDifference(actual, expected))
+local function reportMismatch(map, path, info, expected)
+  info = info or { kind = "header", detail = "invalid BAVC header" }
+  local detail = info.detail
+  if info.kind == "variant" then
+    detail = "legacy variant mismatch: " .. fingerprintDifference(info.actual, expected)
+  end
+  detail = detail or "invalid BAVC header"
+  local event = info.kind == "variant" and "reject-variant"
+             or info.kind == "revision" and "reject-cache-version"
+             or "reject-cache-header"
+  CacheTrace.log(event, map and map.id, path .. " " .. detail)
+  StaticGeometry.record(map and map.id, "cache.record", path, detail)
 end
 
-local function parseHeader(blob, expected)
-  if not blob or #blob < 12 or blob:sub(1, 4) ~= MAGIC then return nil, nil end
+-- FORMAT 3 has a fixed compatibility header: magic, stream format, geometry
+-- revision. The exact visual/config fingerprint is intentionally absent; its
+-- digest selects the physical cache variant instead. FORMAT 2 is accepted only
+-- from the old flat path and still requires its embedded fingerprint to match.
+local function parseHeader(blob, expected, allowLegacy)
+  if not blob or #blob < 8 then
+    return nil, { kind = "header", detail = "truncated BAVC header" }
+  end
+  if blob:sub(1, 4) ~= MAGIC then
+    return nil, { kind = "header", detail = "invalid BAVC magic" }
+  end
   local format = readU32(blob, 5)
-  local n = readU32(blob, 9)
-  if format ~= FORMAT or not n or 12 + n > #blob then return nil, nil end
-  local first = 13
-  local actual = blob:sub(first, first + n - 1)
-  if actual ~= expected then return nil, actual end
-  return first + n, actual
+  if format == FORMAT then
+    if allowLegacy then
+      return nil, { kind = "format", detail =
+        "FORMAT 3 cache record requires a variant-specific path" }
+    end
+    if #blob < 12 then
+      return nil, { kind = "header", detail = "truncated BAVC version header" }
+    end
+    local revision = readU32(blob, 9)
+    if revision ~= Disk.CACHE_REVISION then
+      return nil, { kind = "revision", detail =
+        ("unsupported cache revision %s (expected %d)"):format(
+          tostring(revision), Disk.CACHE_REVISION) }
+    end
+    return 13, { format = format, revision = revision }
+  end
+  if format == LEGACY_FORMAT and allowLegacy then
+    if #blob < 12 then
+      return nil, { kind = "header", detail = "truncated legacy BAVC header" }
+    end
+    local n = readU32(blob, 9)
+    if not n or n <= 0 or 12 + n > #blob then
+      return nil, { kind = "header", detail = "invalid legacy fingerprint header" }
+    end
+    local first = 13
+    local actual = blob:sub(first, first + n - 1)
+    if actual ~= expected then
+      return nil, { kind = "variant", actual = actual, format = format }
+    end
+    return first + n, { format = format, actual = actual, legacy = true }
+  end
+  return nil, { kind = "format", detail =
+    ("unsupported BAVC format %s (expected %d)"):format(tostring(format), FORMAT) }
 end
 
 -- Cheap resume probe for the title-screen whole-game generator.  Reading and
 -- decompressing a 20+ MiB route merely to learn that it is already cached
--- would make "resume" nearly as expensive as generating it, so inspect only
--- the fixed header and exact fingerprint.  The ordinary load path still fully
--- validates every stream before gameplay uses it.
-local function headerMatches(path, expected, map)
+-- would make "resume" nearly as expensive as generating it. New records need
+-- only their fixed version header; a FORMAT 2 fallback additionally checks its
+-- embedded fingerprint. The ordinary load path still validates every stream.
+local function probeHeader(path, expected, map, allowLegacy)
   if not available() then return false, "cache backend unavailable" end
   local ok, blob = true, ramFiles[path]
   if not blob then
@@ -888,17 +1059,38 @@ local function headerMatches(path, expected, map)
     return false, "missing or empty cache record"
   end
   knownSizes[path] = #blob
-  local pos, actual = parseHeader(blob, expected)
-  local matches = pos ~= nil
-  if not matches then
-    reportMismatch(map, path, actual, expected,
-      actual and nil or "invalid BAVC header/format")
+  local pos, info = parseHeader(blob, expected, allowLegacy)
+  if pos then
+    -- Keep resume cheap while rejecting obviously truncated containers. Terrain
+    -- and AUX have two empty streams plus their metadata/spans (28 bytes min);
+    -- an empty tree section needs its four counters plus part count (20 bytes).
+    local minimum = path:find("/tree-", 1, true) and 20 or 28
+    if #blob - pos + 1 < minimum then
+      local detail = ("truncated BAVC payload (%d bytes, need at least %d)"):
+        format(math.max(0, #blob - pos + 1), minimum)
+      CacheTrace.log("reject-cache-body", map and map.id, path .. " " .. detail)
+      StaticGeometry.record(map and map.id, "cache.record", path, detail)
+      return false, detail, true
+    end
+    return true, nil, true
   end
-  if not matches then
-    return false, actual and fingerprintDifference(actual, expected)
-                  or "invalid BAVC header/format"
+  reportMismatch(map, path, info, expected)
+  local detail = info and info.detail
+  if info and info.kind == "variant" then
+    detail = "legacy variant mismatch: " .. fingerprintDifference(info.actual, expected)
   end
-  return true
+  return false, detail or "invalid BAVC header", true
+end
+
+local function headerMatches(path, legacyPath, expected, map)
+  local matched, err, existed = probeHeader(path, expected, map, false)
+  if matched then return true end
+  local legacyMatched, legacyErr, legacyExisted =
+    probeHeader(legacyPath, expected, map, true)
+  if legacyMatched then return true end
+  if existed then return false, err, path end
+  if legacyExisted then return false, legacyErr, legacyPath end
+  return false, err or legacyErr or "missing or empty cache record", path
 end
 
 -- Whether one map/slot has both persistent products the renderer will ask
@@ -906,10 +1098,13 @@ end
 function Disk.complete(map, bodyOnly, masks)
   if not map or not Disk.staticEligible(map) then return false end
   local slot = bodyOnly and "body" or "full"
-  return headerMatches(pathFor(map, "aux", "aux"),
-                       Disk.fingerprint(map, "aux", nil, "aux"), map)
-     and headerMatches(pathFor(map, slot, "terrain"),
-                       Disk.fingerprint(map, slot, masks, "terrain"), map)
+  local auxFp = Disk.fingerprint(map, "aux", nil, "aux")
+  local terrainFp = Disk.fingerprint(map, slot, masks, "terrain")
+  local auxBase = basePathFor(map, "aux", "aux")
+  local terrainBase = basePathFor(map, slot, "terrain")
+  return headerMatches(variantPath(auxBase, auxFp), auxBase, auxFp, map)
+     and headerMatches(variantPath(terrainBase, terrainFp), terrainBase,
+                       terrainFp, map)
 end
 
 
@@ -923,19 +1118,24 @@ function Disk.completeDetails(map, bodyOnly, masks)
                       physical = "-", error = "map is not static-cache eligible" } }
   end
   local slot = bodyOnly and "body" or "full"
+  local auxFp = Disk.fingerprint(map, "aux", nil, "aux")
+  local terrainFp = Disk.fingerprint(map, slot, masks, "terrain")
+  local auxBase = basePathFor(map, "aux", "aux")
+  local terrainBase = basePathFor(map, slot, "terrain")
   local checks = {
-    { kind = "deco", path = pathFor(map, "aux", "aux"),
-      fp = Disk.fingerprint(map, "aux", nil, "aux") },
-    { kind = slot .. "-terrain", path = pathFor(map, slot, "terrain"),
-      fp = Disk.fingerprint(map, slot, masks, "terrain") },
+    { kind = "deco", path = variantPath(auxBase, auxFp),
+      legacyPath = auxBase, fp = auxFp },
+    { kind = slot .. "-terrain", path = variantPath(terrainBase, terrainFp),
+      legacyPath = terrainBase, fp = terrainFp },
   }
   local failures = {}
   for _, check in ipairs(checks) do
-    local matched, err = headerMatches(check.path, check.fp, map)
+    local matched, err, failedPath =
+      headerMatches(check.path, check.legacyPath, check.fp, map)
     if not matched then
       failures[#failures + 1] = {
-        kind = check.kind, path = check.path,
-        physical = physicalPath(check.path), error = err,
+        kind = check.kind, path = failedPath or check.path,
+        physical = physicalPath(failedPath or check.path), error = err,
       }
     end
   end
@@ -959,19 +1159,17 @@ function Disk.stats()
       local size = blob and #blob or knownSizes[path]
       out.files = out.files + 1
       out.bytes = out.bytes + (size or 0)
-      local id = name:match("^(.-)/deco$")
-              or name:match("^(.-)/aux$")
-              or name:match("^(.-)/full%-terrain$")
-              or name:match("^(.-)/body%-terrain$")
-              or name:match("^(.-)/tree%-.+$")
-      if id then maps[id] = true end
-      if name:match("/deco$") or name:match("/aux$") then
+      local id, product = name:match("^([^/]+)/([^/]+)")
+      if id and (product == "deco" or product == "aux"
+          or product == "full-terrain" or product == "body-terrain"
+          or product:match("^tree%-.+$")) then maps[id] = true end
+      if product == "deco" or product == "aux" then
         out.aux = out.aux + 1
-      elseif name:match("/full%-terrain$") then
+      elseif product == "full-terrain" then
         out.full = out.full + 1
-      elseif name:match("/body%-terrain$") then
+      elseif product == "body-terrain" then
         out.body = out.body + 1
-      elseif name:match("/tree%-.+$") then
+      elseif product and product:match("^tree%-.+$") then
         out.trees = out.trees + 1
       end
     end
@@ -1020,8 +1218,11 @@ local function streamRecord(blob, pos, yieldFn)
   return { n = n, chunks = rawChunks }, pos
 end
 
-local function readValidated(path, fp, map)
-  if not available() then CacheTrace.log("cache-unavailable", map and map.id, path); return nil end
+local function readCandidate(path, fp, map, allowLegacy)
+  if not available() then
+    CacheTrace.log("cache-unavailable", map and map.id, path)
+    return nil
+  end
   local blob = ramFiles[path]
   if blob then CacheTrace.log("ram-hit", map and map.id, path) end
   if not blob then
@@ -1032,20 +1233,37 @@ local function readValidated(path, fp, map)
     CacheTrace.log("disk-hit", map and map.id, path .. " bytes=" .. #loaded)
     blob = loaded
     knownSizes[path] = #blob
-    if sessionActive then
-      ramFiles[path] = blob
-      ramBytes = ramBytes + #blob
-    end
   end
   CacheTrace.log("cache-validate", map and map.id, path)
-  local pos, actual = parseHeader(blob, fp)
+  local pos, info = parseHeader(blob, fp, allowLegacy)
   if not pos then
-    reportMismatch(map, path, actual, fp,
-                   actual and nil or "invalid BAVC header/format")
-    discard(path, true)
+    reportMismatch(map, path, info, fp)
+    -- A valid FORMAT 2 file with another fingerprint is another geometry
+    -- variant, not corruption. Keep it available so switching back can use it.
+    if not (info and info.kind == "variant") then discard(path, true) end
     return nil
   end
-  return blob, pos
+  if sessionActive and not ramFiles[path] then
+    ramFiles[path] = blob
+    ramBytes = ramBytes + #blob
+  end
+  return blob, pos, path
+end
+
+local function readValidated(path, legacyPath, fp, map)
+  -- Existing FORMAT 2 precaches are commonly already in the CONTINUE RAM
+  -- mirror. Avoid a pointless variant-path disk miss before using that held
+  -- legacy record; otherwise always prefer the new variant-specific file.
+  local triedLegacy = false
+  if not ramFiles[path] and ramFiles[legacyPath] then
+    triedLegacy = true
+    local blob, pos, used = readCandidate(legacyPath, fp, map, true)
+    if blob then return blob, pos, used end
+  end
+  local blob, pos, used = readCandidate(path, fp, map, false)
+  if blob then return blob, pos, used end
+  if triedLegacy then return nil end
+  return readCandidate(legacyPath, fp, map, true)
 end
 
 -- Prop runs stored with a record: a u32 count, then four floats per run.
@@ -1068,19 +1286,13 @@ local function readSpans(blob, pos)
   return spans, pos
 end
 
-function Disk.loadTerrain(map, slot, masks)
-  if not Disk.staticEligible(map) then return nil end
-  local path = pathFor(map, slot, "terrain")
-  local fp = Disk.fingerprint(map, slot, masks, "terrain")
-  local blob, pos = readValidated(path, fp, map)
-  if not blob then return nil end
+local function decodeTerrainBlob(blob, pos, map, path)
   local terrain, nextPos = streamRecord(blob, pos)
   local water, visualPos
   if nextPos then water, visualPos = streamRecord(blob, nextPos) end
   local visualCount = visualPos and readU32(blob, visualPos) or nil
   if not terrain or not water or not visualCount or visualCount > 4096 then
-    discard(path, true)
-    return nil
+    return rejectBody(map, path, "malformed terrain/water stream")
   end
   pos = visualPos + 4
   local visuals = {}
@@ -1088,14 +1300,12 @@ function Disk.loadTerrain(map, slot, masks)
     local nameBytes = readU32(blob, pos)
     if not nameBytes or nameBytes == 0 or nameBytes > 4096
        or pos + 4 + nameBytes - 1 > #blob then
-      discard(path, true)
-      return nil
+      return rejectBody(map, path, "malformed terrain visual name")
     end
     local id = blob:sub(pos + 4, pos + 3 + nameBytes)
     local stream, nextVisual = streamRecord(blob, pos + 4 + nameBytes)
     if not stream or visuals[id] then
-      discard(path, true)
-      return nil
+      return rejectBody(map, path, "malformed or duplicate terrain visual stream")
     end
     visuals[id] = stream
     pos = nextVisual
@@ -1103,19 +1313,36 @@ function Disk.loadTerrain(map, slot, masks)
   local registryBytes = readU32(blob, pos)
   if not registryBytes or registryBytes > 8 * 1024 * 1024
      or pos + 4 + registryBytes - 1 > #blob then
-    discard(path, true)
-    return nil
+    return rejectBody(map, path, "malformed placement registry")
   end
   local registry = blob:sub(pos + 4, pos + 3 + registryBytes)
   local finalPos = pos + 4 + registryBytes
   local spans
   spans, finalPos = readSpans(blob, finalPos)
   if not spans or finalPos ~= #blob + 1 then
-    discard(path, true)
-    return nil
+    return rejectBody(map, path, "malformed terrain spans or trailing bytes")
   end
   return { terrain = terrain, water = water,
            visuals = visuals, registry = registry, spans = spans }
+end
+
+function Disk.loadTerrain(map, slot, masks)
+  if not Disk.staticEligible(map) then return nil end
+  local fp = Disk.fingerprint(map, slot, masks, "terrain")
+  local legacyPath = basePathFor(map, slot, "terrain")
+  local path = pathFor(map, slot, "terrain", fp)
+  local blob, pos, usedPath = readValidated(path, legacyPath, fp, map)
+  if not blob then return nil end
+  usedPath = usedPath or path
+  local decoded = decodeTerrainBlob(blob, pos, map, usedPath)
+  if decoded or usedPath ~= path then return decoded end
+  -- A compatible legacy record is still valuable if the preferred FORMAT 3
+  -- container has a good header but a damaged body. The failed new variant was
+  -- quarantined by rejectBody(), so retry only the exact-fingerprint flat file.
+  local legacyBlob, legacyPos, legacyUsed =
+    readCandidate(legacyPath, fp, map, true)
+  if not legacyBlob then return nil end
+  return decodeTerrainBlob(legacyBlob, legacyPos, map, legacyUsed or legacyPath)
 end
 
 local function float4(blob, pos)
@@ -1124,18 +1351,13 @@ local function float4(blob, pos)
   return { a, b, c, d }, nextPos
 end
 
-function Disk.loadAux(map)
-  if not Disk.staticEligible(map) then return nil end
-  local path = pathFor(map, "aux", "aux")
-  local fp = Disk.fingerprint(map, "aux", nil, "aux")
-  local blob, pos = readValidated(path, fp, map)
-  if not blob then return nil end
+local function decodeAuxBlob(blob, pos, map, path)
   local grass, p2 = streamRecord(blob, pos)
   local flowers, p3
   if p2 then flowers, p3 = streamRecord(blob, p2) end
   local count = p3 and readU32(blob, p3) or nil
   if not grass or not flowers or not count or count > 1024 then
-    discard(path, true); return nil
+    return rejectBody(map, path, "malformed auxiliary grass/flower stream")
   end
   pos = p3 + 4
   local figures = {}
@@ -1143,7 +1365,9 @@ function Disk.loadAux(map)
     local stream, nextPos = streamRecord(blob, pos)
     local meta, finalPos
     if nextPos then meta, finalPos = float4(blob, nextPos) end
-    if not stream or not meta then discard(path, true); return nil end
+    if not stream or not meta then
+      return rejectBody(map, path, "malformed auxiliary figure stream")
+    end
     stream.wx, stream.wz, stream.y, stream.w = meta[1], meta[2], meta[3], meta[4]
     figures[#figures + 1] = stream
     pos = finalPos
@@ -1153,33 +1377,46 @@ function Disk.loadAux(map)
   local flowerSpans, finalPos
   if afterGrass then flowerSpans, finalPos = readSpans(blob, afterGrass) end
   if not grassSpans or not flowerSpans or finalPos ~= #blob + 1 then
-    discard(path, true); return nil
+    return rejectBody(map, path, "malformed auxiliary spans or trailing bytes")
   end
   grass.spans, flowers.spans = grassSpans, flowerSpans
   return { grass = grass, flowers = flowers, figures = figures }
+end
+
+function Disk.loadAux(map)
+  if not Disk.staticEligible(map) then return nil end
+  local fp = Disk.fingerprint(map, "aux", nil, "aux")
+  local legacyPath = basePathFor(map, "aux", "aux")
+  local path = pathFor(map, "aux", "aux", fp)
+  local blob, pos, usedPath = readValidated(path, legacyPath, fp, map)
+  if not blob then return nil end
+  usedPath = usedPath or path
+  local decoded = decodeAuxBlob(blob, pos, map, usedPath)
+  if decoded or usedPath ~= path then return decoded end
+  local legacyBlob, legacyPos, legacyUsed =
+    readCandidate(legacyPath, fp, map, true)
+  if not legacyBlob then return nil end
+  return decodeAuxBlob(legacyBlob, legacyPos, map, legacyUsed or legacyPath)
 end
 
 -- Load mature-tree sections as raw unindexed six-float streams.  GPU meshes
 -- are deliberately reconstructed by CommunityFlora under its own four-ms
 -- frame budget; a cache hit therefore avoids both the procedural crown build
 -- and an unbounded upload on the render thread.
-function Disk.loadTreeParts(map, recipe, signature, yieldFn)
-  if not Disk.staticEligible(map) then return nil end
-  local path = treePath(map, recipe, signature)
-  local fp = treeFingerprint(map, recipe, signature)
-  local blob, pos = readValidated(path, fp, map)
-  if not blob then return nil end
+local function decodeTreeBlob(blob, pos, map, path, yieldFn)
   local treeCount = readU32(blob, pos)
   local treeN = treeCount and readU32(blob, pos + 4)
   local boulderN = treeN and readU32(blob, pos + 8)
   local cellCount = boulderN and readU32(blob, pos + 12)
   if not treeCount or not treeN or not boulderN or not cellCount
-     or cellCount > 65536 then discard(path, true); return nil end
+     or cellCount > 65536 then
+    return rejectBody(map, path, "malformed tree section header")
+  end
   pos = pos + 16
   local cells = {}
   for i = 1, cellCount do
     local meta, nextPos = float4(blob, pos)
-    if not meta then discard(path, true); return nil end
+    if not meta then return rejectBody(map, path, "malformed tree placement cell") end
     cells[#cells + 1] = {
       meta[1], meta[2], meta[3] == 1 and "b" or "t",
       meta[4] > -1e20 and meta[4] or nil,
@@ -1188,30 +1425,55 @@ function Disk.loadTreeParts(map, recipe, signature, yieldFn)
     if yieldFn and i % 128 == 0 then yieldFn() end
   end
   local count = readU32(blob, pos)
-  if not count or count > 4096 then discard(path, true); return nil end
+  if not count or count > 4096 then
+    return rejectBody(map, path, "malformed tree part count")
+  end
   pos = pos + 4
   local parts = {}
   for _ = 1, count do
     local meta, nextPos = float4(blob, pos)
-    if not meta then discard(path, true); return nil end
+    if not meta then return rejectBody(map, path, "malformed tree part metadata") end
     pos = nextPos
     local flags, farCount = readU32(blob, pos), readU32(blob, pos + 4)
-    if not flags or flags > 1 or not farCount then discard(path, true); return nil end
+    if not flags or flags > 1 or not farCount then
+      return rejectBody(map, path, "malformed tree part flags")
+    end
     pos = pos + 8
     local part = { x = meta[1], y = meta[2], z = meta[3], radius = meta[4],
                    apron = flags == 1, detailFarCount = farCount }
     for _, name in ipairs(TREE_MATERIALS) do
       local stream
       stream, pos = streamRecord(blob, pos, yieldFn)
-      if not stream then discard(path, true); return nil end
+      if not stream then
+        return rejectBody(map, path, "malformed tree material stream " .. name)
+      end
       part[name] = stream
     end
     parts[#parts + 1] = part
     if yieldFn then yieldFn() end
   end
-  if pos ~= #blob + 1 then discard(path, true); return nil end
+  if pos ~= #blob + 1 then
+    return rejectBody(map, path, "malformed tree trailing bytes")
+  end
   return { parts = parts, count = treeCount, tN = treeN, bN = boulderN,
            cells = cells }
+end
+
+function Disk.loadTreeParts(map, recipe, signature, yieldFn)
+  if not Disk.staticEligible(map) then return nil end
+  local fp = treeFingerprint(map, recipe, signature)
+  local legacyPath = treeBasePath(map, recipe, signature)
+  local path = treePath(map, recipe, signature, fp)
+  local blob, pos, usedPath = readValidated(path, legacyPath, fp, map)
+  if not blob then return nil end
+  usedPath = usedPath or path
+  local decoded = decodeTreeBlob(blob, pos, map, usedPath, yieldFn)
+  if decoded or usedPath ~= path then return decoded end
+  local legacyBlob, legacyPos, legacyUsed =
+    readCandidate(legacyPath, fp, map, true)
+  if not legacyBlob then return nil end
+  return decodeTreeBlob(legacyBlob, legacyPos, map,
+                        legacyUsed or legacyPath, yieldFn)
 end
 
 local function write(file, bytes) file:write(bytes) end
@@ -1295,7 +1557,7 @@ local function encoded(fp, writer)
     parts[#parts + 1] = bytes
     return true
   end
-  write(sink, header(fp))
+  write(sink, header())
   writer(sink)
   return table.concat(parts)
 end
@@ -1397,8 +1659,8 @@ end
 
 function Disk.saveTerrain(map, slot, masks, terrain, water, visuals, registry)
   if not Disk.staticEligible(map) then return false end
-  local path = pathFor(map, slot, "terrain")
   local fp = Disk.fingerprint(map, slot, masks, "terrain")
+  local path = pathFor(map, slot, "terrain", fp)
   return writeFile(path, fp, function(file)
     writeChunked(file, terrain)
     writeChunked(file, water)
@@ -1429,8 +1691,8 @@ end
 
 function Disk.saveAux(map, aux)
   if not Disk.staticEligible(map) then return false end
-  local path = pathFor(map, "aux", "aux")
   local fp = Disk.fingerprint(map, "aux", nil, "aux")
+  local path = pathFor(map, "aux", "aux", fp)
   return writeFile(path, fp, function(file)
     writeChunked(file, aux.grass)
     writeChunked(file, aux.flowers)
@@ -1448,8 +1710,8 @@ end
 function Disk.saveTreeParts(map, recipe, signature, parts, yieldFn)
   if not Disk.staticEligible(map) then return false end
   parts = parts or {}
-  local path = treePath(map, recipe, signature)
   local fp = treeFingerprint(map, recipe, signature)
+  local path = treePath(map, recipe, signature, fp)
   return writeFile(path, fp, function(file)
     write(file, u32(parts.count or 0))
     write(file, u32(parts.tN or 0))
@@ -1485,15 +1747,21 @@ function Disk.purge()
   local fs = persistenceFilesystem()
   local removed = 0
   -- The current storage facade is the authoritative backend on modern
-  -- engines. The public byte API has no delete primitive, so overwrite each
-  -- cache body with an empty value; ordinary validation treats that as absent
-  -- and rebuilds it. Read-only facades simply reject these writes.
+  -- engines. Prefer its delete primitive so list()/stats()/RAM planning cannot
+  -- keep seeing zero-byte tombstones. Older facades fall back to empty writes.
+  -- The native legacy backend is removed only by the filesystem loop below so
+  -- each physical record is counted once.
   if storage and storage.list and storage.writeBytes then
     local ok, names = pcall(storage.list, storage, LOGICAL_DIRECTORY)
     if ok then
       for _, key in ipairs(names or {}) do
         if key:sub(1, #LOGICAL_DIRECTORY + 1) == LOGICAL_DIRECTORY .. "/" then
-          local called, did = pcall(storage.writeBytes, storage, key, "")
+          local called, did
+          if type(storage.delete) == "function" then
+            called, did = pcall(storage.delete, storage, key)
+          elseif not Disk.legacy() then
+            called, did = pcall(storage.writeBytes, storage, key, "")
+          end
           if called and did == true then removed = removed + 1 end
         end
       end
@@ -1533,3 +1801,4 @@ Disk.saveTreeParts = Timings.wrap("cache_other", Disk.saveTreeParts)
 Disk.saveRamToDisk = Timings.wrap("cache_other", Disk.saveRamToDisk)
 
 return Disk
+

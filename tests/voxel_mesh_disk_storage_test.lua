@@ -35,6 +35,11 @@ function storage:writeBytes(_, key, value)
   if persists then bytes[key] = value end
   return true
 end
+function storage:delete(_, key)
+  if not bytes[key] then return false end
+  bytes[key] = nil
+  return true
+end
 
 local V = { mod = { storage = storage } }
 function V.require(name)
@@ -55,8 +60,11 @@ ok(stats.aux == 1 and stats.body == 1 and stats.full == 1,
   "Windows-safe deco product is reported as AUX")
 
 ok(Disk.purge() == 3, "purge invalidates the active storage facade")
-ok(bytes["cache/static-mesh-v2/PALLET/full-terrain"] == "",
-  "purged storage body cannot be reused")
+ok(bytes["cache/static-mesh-v2/PALLET/full-terrain"] == nil,
+  "purge deletes storage bodies instead of leaving zero-byte tombstones")
+stats = Disk.stats()
+ok(stats.files == 0 and stats.maps == 0,
+  "purged storage keys disappear from stats and future RAM plans")
 
 persists = false
 bound, result = pcall(Disk.bind, {save={version="red-test"}}, false)

@@ -309,6 +309,17 @@ check(lavenderCache == fingerprint('LAVENDER_TOWN', false, true),
   'Lavender cache identity ignores unrelated GRASS changes')
 check(lavenderCache ~= fingerprint('LAVENDER_TOWN', true, false),
   'Lavender CITY GROUND modes have distinct persistent mesh identities')
+Community.cityGround.value = 'default'
+Community.grass.value = 'default'
+Community.tower.value = 'default'
+local lavenderBattleTower = Disk.fingerprint(cacheMap('LAVENDER_TOWN'), 'body', nil, 'terrain')
+Community.tower.value = 'n64memory'
+local lavenderLegendaryTower = Disk.fingerprint(cacheMap('LAVENDER_TOWN'), 'body', nil, 'terrain')
+check(lavenderBattleTower ~= lavenderLegendaryTower,
+  'Lavender Battle Art and Legendary Tower body geometry keep distinct fingerprints')
+check(Disk.variantId(lavenderBattleTower) ~= Disk.variantId(lavenderLegendaryTower),
+  'Lavender Battle Art and Legendary Tower resolve to distinct FORMAT 3 variant paths')
+Community.tower.value = 'default'
 check(lavenderCache:find('lavender-battle-parity-v5', 1, true) ~= nil,
   'Lavender body cache invalidates the pre-parity sandy Battle Art mesh')
 local route10Cache = fingerprint('ROUTE_10', false, false)

@@ -136,11 +136,13 @@ V.companion = Companion
 -- to observe later map/revision changes. This must not depend on a render
 -- pipeline being active: KFP can attach while Battle Art's voxel mode is off.
 local uninstallCompanion = CompanionLifecycle.install(mod, Companion)
+local uninstallOptionsMenu
 
 -- `core.quit_to_launcher` is the engine's native mod-unload boundary. Retain
 -- the exact disposer returned above and run it before this loader is replaced,
 -- so claims, adapter GPU resources, and the update hook cannot survive unload.
 mod.hooks:wrap("core.quit_to_launcher", function(next)
+  if uninstallOptionsMenu then uninstallOptionsMenu() end
   uninstallCompanion()
   return next()
 end)
@@ -1834,16 +1836,53 @@ end)
 -- instead of jumping to the top when the list below it shortens.
 do
   local OptionsMenu = require("src.ui.OptionsMenu")
+  -- OptionsMenu is a process-global module table. A previous instance of this
+  -- mod may have wrapped it before returning to the launcher, while all of the
+  -- setting objects captured by that wrapper belonged to the old loader. Undo
+  -- a wrapper installed by this implementation before binding the fresh one.
+  if OptionsMenu.dramaticShapeBaseNew and OptionsMenu.dramaticShapeBaseUpdate then
+    OptionsMenu.new = OptionsMenu.dramaticShapeBaseNew
+    OptionsMenu.update = OptionsMenu.dramaticShapeBaseUpdate
+    OptionsMenu.dramaticShapeBaseNew = nil
+    OptionsMenu.dramaticShapeBaseUpdate = nil
+    OptionsMenu.dramaticShapeFullHook = nil
+  end
   if not OptionsMenu.dramaticShapeFullHook then
     local Pipelines = require("src.render.Pipelines")
     local newMenu = OptionsMenu.new
     local inner = OptionsMenu.update
+    OptionsMenu.dramaticShapeBaseNew = newMenu
+    OptionsMenu.dramaticShapeBaseUpdate = inner
+
+    -- Rows in this mod can depend on other live settings: BATTLE ART swaps
+    -- PLAYER ART for PLAYER ANIM, 3D-BTL gates the whole battle block, Ember
+    -- presets expose their CUSTOM controls, and provider availability can add
+    -- a row after the menu was first built. Keep one compact signature on each
+    -- menu instance so changes made on another page (or through mod-manager
+    -- events) are noticed when this page becomes active again. This replaces
+    -- a brittle list of individually watched parent settings.
+    local function visibilitySignature()
+      local bits = {
+        Voxel.isFull(Pipelines.level("voxel")) and "F" or "N",
+        LegendaryVisualsPreset.mode() == "custom" and "C" or "P",
+      }
+      for _, entry in ipairs(SETTINGS) do
+        local visible = true
+        if entry.when then
+          local ok, value = pcall(entry.when)
+          visible = ok and value and true or false
+        end
+        bits[#bits + 1] = visible and "1" or "0"
+      end
+      return table.concat(bits)
+    end
 
     -- Keep ui.options.rows flat, as promised by the hook contract. Only the
     -- latest screen's visible list is collapsed, just like the engine's own
     -- categories keep OptionsMenu.rows flat for mods and focus helpers.
     function OptionsMenu.new(game, opts)
       local menu = newMenu(game, opts)
+      menu.dramaticShapeVisibility = visibilitySignature()
       if (opts and opts.rows) or not categorizedOptionsAvailable() then
         return menu
       end
@@ -1879,24 +1918,12 @@ do
     end
 
     function OptionsMenu:update(dt)
-      local before = Pipelines.level("voxel")
-      local hadBattles = OverworldBattle.enabled()
-      local hadBattleArt = BattleArt.setting:get()
-      local hadPokeballs = PokeballSettings.active()
-      local hadPokeballPreset = PokeballSettings.preset:get()
-      local hadLegendaryMode = LegendaryVisualsPreset.mode()
+      local beforeVisibility = self.dramaticShapeVisibility or visibilitySignature()
       local wasOn = idAt(self, self.index)
       inner(self, dt)
       BattleArt.forceRomPlayer(self.game)
-      local after = Pipelines.level("voxel")
-      local crossedFull = after ~= before
-                          and (Voxel.isFull(before) or Voxel.isFull(after))
-      local hasBattleArt = BattleArt.setting:get()
-      if crossedFull or OverworldBattle.enabled() ~= hadBattles
-         or hasBattleArt ~= hadBattleArt
-         or PokeballSettings.active() ~= hadPokeballs
-         or PokeballSettings.preset:get() ~= hadPokeballPreset
-         or LegendaryVisualsPreset.mode() ~= hadLegendaryMode then
+      local afterVisibility = visibilitySignature()
+      if afterVisibility ~= beforeVisibility then
         local rebuilt = OptionsMenu.new(self.game)
         if self.dramaticShapeCategory then
           local group = findOptionGroup(rebuilt.view or rebuilt.rows,
@@ -1917,9 +1944,22 @@ do
         local cancel = #visible + 1
         if (self.index or 1) > cancel then self.index = cancel end
       end
+      self.dramaticShapeVisibility = afterVisibility
     end
 
     OptionsMenu.dramaticShapeFullHook = true
+    local installedNew, installedUpdate = OptionsMenu.new, OptionsMenu.update
+    uninstallOptionsMenu = function()
+      -- Restore only if our methods are still the outermost wrappers. If a
+      -- later mod deliberately wrapped either method, leave its chain intact.
+      if OptionsMenu.new == installedNew then OptionsMenu.new = newMenu end
+      if OptionsMenu.update == installedUpdate then OptionsMenu.update = inner end
+      if OptionsMenu.new == newMenu and OptionsMenu.update == inner then
+        OptionsMenu.dramaticShapeFullHook = nil
+        OptionsMenu.dramaticShapeBaseNew = nil
+        OptionsMenu.dramaticShapeBaseUpdate = nil
+      end
+    end
   end
 end
 
