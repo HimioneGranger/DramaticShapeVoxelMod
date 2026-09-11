@@ -26,14 +26,21 @@ end
 local f=assert(io.open('main.lua','rb'));local main=f:read('*a');f:close()
 local start=assert(main:find('local LEGENDARY_ROOT =',1,true))
 local finish=assert(main:find('-- Categorized OPTIONS first shipped',start,true))
-local env=setmetatable({CommunityVisuals=C},{__index=function(t,k)
+local masterSetting={key='legendaryVisualsMode'}
+local legendaryMode='off'
+local managed={}
+for _,setting in ipairs(C.settings)do managed[setting]=true end
+local preset={setting=masterSetting,mode=function()return legendaryMode end,
+  isMember=function(setting)return managed[setting]==true end}
+local env=setmetatable({CommunityVisuals=C,LegendaryVisualsPreset=preset},{__index=function(t,k)
   if _G[k]~=nil then return _G[k] end
   local proxy=setmetatable({},{__index=function(p,n)local value={};rawset(p,n,value);return value end})
   rawset(t,k,proxy);return proxy
 end})
-local fn=assert(loadstring(main:sub(start,finish-1)..'\nreturn LEGENDARY_CATEGORIES, OPTION_CATEGORY'))
+local fn=assert(loadstring(main:sub(start,finish-1)
+  ..'\nreturn LEGENDARY_ROOT, LEGENDARY_CATEGORIES, OPTION_CATEGORIES, ALL_OPTION_CATEGORIES, OPTION_CATEGORY'))
 setfenv(fn,env)
-local categories, mapping=fn()
+local root,categories,ordinary,allCategories,mapping=fn()
 local expected={casino='legendary_game_corner',prizeRoom='legendary_game_corner',
   cityGround='legendary_lavender',tunnels='legendary_interiors',rocket='legendary_interiors',
   elevator='legendary_interiors',treeDetail='legendary_nature'}
@@ -43,6 +50,40 @@ for _,group in ipairs(categories)do for _,setting in ipairs(group.settings)do
   seen[setting]=group.id
 end end
 for name,id in pairs(expected)do check(mapping[C[name]].id==id,'submenu placement: '..name)end
+
+-- The master selector is always the first Legendary row. Preset-owned child
+-- pages disappear outside CUSTOM, while independent style/audio pages remain.
+local rowsStart=assert(main:find('local function categorizedRows(rows)',finish,true))
+local rowsEnd=assert(main:find('-- GBC FX',rowsStart,true))
+local rowsEnv=setmetatable({LEGENDARY_ROOT=root,LEGENDARY_CATEGORIES=categories,
+  OPTION_CATEGORIES=ordinary,ALL_OPTION_CATEGORIES=allCategories,
+  OPTION_CATEGORY=mapping,LegendaryVisualsPreset=preset,
+  require=function(name)if name=='src.ui.OptionsMenu'then return {} end return require(name)end,
+},{__index=_G})
+local rowsFn=assert(loadstring(main:sub(rowsStart,rowsEnd-1)..'\nreturn categorizedRows'))
+setfenv(rowsFn,rowsEnv)
+local categorize=rowsFn()
+local function group(rows,id)
+  for _,row in ipairs(rows or {})do
+    if row.id=='BATTLE_ART_VOXEL_FORK:group:'..id then return row end
+  end
+end
+local masterRow={id='master',optionSetting=masterSetting}
+local cityRow={id='city',optionSetting=C.cityGround}
+local towerStyleRow={id='tower-style',optionSetting=env.CommunityVisuals.towerWall}
+managed[env.CommunityVisuals.towerWall]=false
+local offRoot=assert(group(categorize({masterRow,cityRow,towerStyleRow}),'legendary_visuals'))
+check(offRoot.members[1]==masterRow and offRoot.value()=='OFF',
+  'Legendary root exposes the OFF/CUSTOM/AUTO/FULL master first')
+check(not group(offRoot.members,'legendary_lavender'),
+  'OFF hides preset-owned Lavender child page')
+check(group(offRoot.members,'legendary_tower')~=nil,
+  'OFF keeps independent Tower style page available')
+legendaryMode='custom'
+local customRoot=assert(group(categorize({masterRow,cityRow,towerStyleRow}),'legendary_visuals'))
+check(customRoot.value()=='CUSTOM' and group(customRoot.members,'legendary_lavender')~=nil,
+  'CUSTOM restores remembered individual Legendary pages')
+legendaryMode='off'
 local gateStart=assert(main:find('local function categorizedOptionsAvailable()',1,true))
 local gateEnd=assert(main:find('local function findOptionGroup',gateStart,true))
 local gate=assert(loadstring(main:sub(gateStart,gateEnd-1)..'\nreturn categorizedOptionsAvailable'))()

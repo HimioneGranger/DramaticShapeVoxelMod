@@ -53,6 +53,7 @@ local CavePerimeter = V.require("CavePerimeter")
 local CaveSconces = V.require("CaveSconces")
 local TowerLobbyDetails = V.require("TowerLobbyDetails")
 local TowerGraveMist = V.require("TowerGraveMist")
+local LegendaryTowerExterior = V.require("LegendaryTowerExterior")
 local CaveAtmosphere3D = V.require("CaveAtmosphere3D")
 local WorldUnderlay = V.require("WorldUnderlay")
 local Backdrop = V.require("Backdrop")
@@ -795,7 +796,9 @@ local function castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh,
 
   ShadowMap.draw(terrain, atlasFor(host), nil)
   V.require("GameCorner").draw(host, ShadowMap)
+  LegendaryTowerExterior.drawMap(host,nil,ShadowMap)
   for _,nb in ipairs(neighbors)do V.require("LegendaryGarden").draw(nb.map,ShadowMap,Mat4.translate(nb.ox,0,nb.oy))end
+  for _,nb in ipairs(neighbors)do LegendaryTowerExterior.drawMap(nb.map,Mat4.translate(nb.ox,0,nb.oy),ShadowMap) end
   for i, nb in ipairs(neighbors) do
     ShadowMap.draw(nbMesh[i], atlasFor(nb.map), Mat4.translate(nb.ox, 0, nb.oy))
   end
@@ -1325,7 +1328,9 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
       end
       Voxel3D.draw(terrain, atlasFor(host), nil)
       V.require("GameCorner").draw(host)
+      LegendaryTowerExterior.drawMap(host)
       for _,nb in ipairs(neighbors)do V.require("LegendaryGarden").draw(nb.map,nil,Mat4.translate(nb.ox,0,nb.oy))end
+      for _,nb in ipairs(neighbors)do LegendaryTowerExterior.drawMap(nb.map,Mat4.translate(nb.ox,0,nb.oy)) end
       Voxel3D.glass(true)
       -- Free roam closes the finite CAVERN map with this same natural-rock
       -- ridge. The pulled-back battle camera needs it too; without it the

@@ -574,6 +574,11 @@ function Disk.fingerprint(map, slot, masks, kind)
       -- treatment too. Invalidate the prior default-mode sandy city body so
       -- an old persistent mesh cannot make the parity fix appear to do nothing.
       parts[#parts + 1] = "lavender-battle-parity-v5"
+      -- TOWER VISUALS now suppresses the stock exterior building quads. Keep
+      -- Battle Art and Legendary body caches distinct so neither silhouette
+      -- can be resurrected from persistent storage after switching modes.
+      parts[#parts + 1] = "legendary-tower-exterior-v1"
+      parts[#parts + 1] = CommunityVisuals.tower:get()
     end
   end
   if mapId:match("^POKEMON_TOWER_[1-7]F$") then

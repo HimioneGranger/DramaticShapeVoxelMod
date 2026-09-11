@@ -108,7 +108,12 @@ check(#ranges == 1 and ranges[1][1] == 0 and ranges[1][2] == 6,
 local options = assert(loadfile('lib/CommunityVisuals.lua'))({require = function(name)
   assert(name == 'ModSetting')
   return {new = function(key, label, values, labels, default)
-    return {key = key, value = values[default or 1], get = function(self) return self.value end,
+    return {key = key, values = values, value = values[default or 1],
+            read = function(self)
+              for i, v in ipairs(self.values) do if v == self.value then return i end end
+              return default or 1
+            end,
+            get = function(self) return self.value end,
             row = function() return {step = function() end} end}
   end}
 end})

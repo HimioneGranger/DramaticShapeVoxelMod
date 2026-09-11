@@ -15,6 +15,9 @@ local function key(x, z) return (z + 64) * 4096 + x + 64 end
 local Buildings = assert(loadfile('lib/Buildings.lua'))({
   require = function(name)
     if name == 'BuildBudget' then return { tick = function() end } end
+    if name == 'LegendaryTowerExterior' then
+      return { activeFor = function() return false end }
+    end
     return {}
   end,
 })

@@ -44,6 +44,7 @@ local CavePerimeter = V.require("CavePerimeter")
 local CaveSconces = V.require("CaveSconces")
 local TowerLobbyDetails = V.require("TowerLobbyDetails")
 local TowerGraveMist = V.require("TowerGraveMist")
+local LegendaryTowerExterior = V.require("LegendaryTowerExterior")
 local CaveAtmosphere3D = V.require("CaveAtmosphere3D")
 local RenderDistance = V.require("RenderDistance")
 local CharacterRenderers = V.require("CharacterRenderers")
@@ -1215,9 +1216,11 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
   SafariFoliage.draw(state.map,0,0,ShadowMap)
   for _,nb in ipairs(state.neighbors or {})do if RenderDistance.neighbor(nb,state.player)then SafariFoliage.draw(nb.map,nb.ox or 0,nb.oy or 0,ShadowMap)end end
   V.require("GameCorner").draw(state.map,ShadowMap)
+  LegendaryTowerExterior.drawMap(state.map,nil,ShadowMap)
   for _,nb in ipairs(state.neighbors or {})do
     if RenderDistance.neighbor(nb,state.player)then
       V.require("LegendaryGarden").draw(nb.map,ShadowMap,Mat4.translate(nb.ox,0,nb.oy))
+      LegendaryTowerExterior.drawMap(nb.map,Mat4.translate(nb.ox,0,nb.oy),ShadowMap)
     end
   end
   SafariStatues.draw(state.map,0,0,ShadowMap,atlasFor(state.map))
@@ -1468,9 +1471,11 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
   SafariFoliage.draw(state.map,0,0)
   for _,nb in ipairs(state.neighbors or {})do if RenderDistance.neighbor(nb,state.player)then SafariFoliage.draw(nb.map,nb.ox or 0,nb.oy or 0)end end
   V.require("GameCorner").draw(state.map)
+  LegendaryTowerExterior.drawMap(state.map)
   for _,nb in ipairs(state.neighbors or {})do
     if RenderDistance.neighbor(nb,state.player)then
       V.require("LegendaryGarden").draw(nb.map,nil,Mat4.translate(nb.ox,0,nb.oy))
+      LegendaryTowerExterior.drawMap(nb.map,Mat4.translate(nb.ox,0,nb.oy))
     end
   end
   SafariStatues.draw(state.map,0,0,nil,atlasFor(state.map))

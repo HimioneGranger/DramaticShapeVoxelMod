@@ -1613,6 +1613,7 @@ function Buildings.stamp(S, map, quads, tx, ty, bw, bh, t)
 
   local mx, mz = tx * 8, ty * 8
   local out = S.objectQuads
+  local legendaryTower = V.require("LegendaryTowerExterior").activeFor(map, t)
 
   -- Only an OUTDOOR placement containing an engine-authored door is an
   -- enterable facade. The same template can describe decorative scenery,
@@ -1643,7 +1644,10 @@ function Buildings.stamp(S, map, quads, tx, ty, bw, bh, t)
     end
   end
 
-  for _, q in ipairs(quads) do
+  -- Legendary Tower owns the exterior presentation but not the footprint.
+  -- Keep every claim/ground/warp decision above, and suppress only the stock
+  -- Battle Art building quads so the separate Gothic mesh can replace them.
+  for _, q in ipairs(legendaryTower and {} or quads) do
     local shade = q.shade
     if oneSidedFacade and q.facade then
       -- Negative shade is an internal geometry marker. ChunkMesher's AO
@@ -1681,7 +1685,7 @@ function Buildings.stamp(S, map, quads, tx, ty, bw, bh, t)
   -- door on the matching model flank. Two consecutive warp cells form one
   -- 32px double-door assembly. A lone warp is deliberately ignored: normal
   -- houses and front entrances stay under the ordinary facade path above.
-  if S.outdoor and quads.sideDoorUV and map.def and map.def.warps then
+  if not legendaryTower and S.outdoor and quads.sideDoorUV and map.def and map.def.warps then
     local bySide = { west = {}, east = {} }
     for _, warp in ipairs(map.def.warps) do
       local cx, cy = tonumber(warp.x), tonumber(warp.y)

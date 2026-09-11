@@ -78,7 +78,10 @@ if CommunityVisuals.treeDetail.read then
   local readDetail = CommunityVisuals.treeDetail.read
   function CommunityVisuals.treeDetail:read()
     if not self.index then
-      self.defaultIndex = CommunityVisuals.trees:get() == "n64memory" and 1 or 2
+      -- Read the stored tree choice, not a temporary LEGENDARY VISUALS preset
+      -- overlay. CUSTOM must restore the player's own remembered combination.
+      local rawTree = CommunityVisuals.trees.values[CommunityVisuals.trees:read()]
+      self.defaultIndex = rawTree == "n64memory" and 1 or 2
     end
     return readDetail(self)
   end
@@ -297,6 +300,7 @@ function CommunityVisuals.invalidate()
   pcall(function() V.require("CaveAtmosphere3D").invalidate() end)
   pcall(function() V.require("TowerGraveMist").invalidate() end)
   pcall(function() V.require("TowerLobbyDetails").invalidate() end)
+  pcall(function() V.require("LegendaryTowerExterior").invalidate() end)
   pcall(function() V.require("Backdrop").invalidate() end)
   pcall(function() V.require("SkyLayer").invalidate() end)
   pcall(function() V.require("ForestAtmos").invalidate() end)

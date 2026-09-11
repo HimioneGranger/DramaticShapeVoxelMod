@@ -123,6 +123,7 @@ local CharacterRenderers = V.require("CharacterRenderers")
 local CommunityVisuals = V.require("CommunityVisuals")
 local ForestAtmos = V.require("ForestAtmos")
 local TowerFogSettings = V.require("TowerFogSettings")
+local LegendaryVisualsPreset = V.require("LegendaryVisualsPreset")
 
 -- The public provider is created while this mod loads, before consumers resolve
 -- optional dependencies. The dispatcher starts at mods.loaded; a consumer that
@@ -653,6 +654,13 @@ local function stagedBattles()
 end
 
 local SETTINGS = {
+  { LegendaryVisualsPreset.setting,
+    "One master profile for Legendary world visuals. OFF preserves Battle Art, "
+    .. "CUSTOM restores the exact individual choices you last made, AUTO enables "
+    .. "the complete Legendary presentation with balanced detail, and FULL uses "
+    .. "the richest supported detail tiers. Style, audio, Ember Legacy and battle "
+    .. "presentation choices remain independent. Presets never overwrite CUSTOM.",
+    full = true },
   { CommunityVisuals.casino, "Choose Battle Art or Legendary Visuals for casino. Rebuilds the room when changed.", full = true },
   { CommunityVisuals.prizeRoom, "Choose Battle Art or Legendary Visuals for prize room. Rebuilds the room when changed.", full = true },
   { CommunityVisuals.tunnels, "Choose Battle Art or Legendary Visuals for tunnels. Rebuilds the room when changed.", full = true },
@@ -691,10 +699,11 @@ local SETTINGS = {
     full = true },
   { CommunityVisuals.tower,
     "Master switch for the Pokemon Tower conversion. BATTLE ART restores the "
-    .. "original Tower atlas, wall height, floor, counter, graves and stairs "
-    .. "and suppresses Legendary fog and detail passes. LEGENDARY VISUALS "
-    .. "restores the complete approved Tower while retaining the individual "
-    .. "detail, fog thickness and fog speed choices below.",
+    .. "original Lavender exterior plus Tower atlas, wall height, floor, counter, "
+    .. "graves and stairs, and suppresses Legendary fog/detail passes. LEGENDARY "
+    .. "VISUALS uses the Gothic Lavender exterior and complete approved Tower "
+    .. "interior while retaining the independent wall style, fog thickness and "
+    .. "fog speed choices below.",
     full = true },
   { CommunityVisuals.towerWall,
     "Choose the Pokemon Tower wall slab while Legendary Visuals is active. "
@@ -1259,11 +1268,21 @@ end
 local function categorizedRows(rows)
   local buckets = {}
   for _, category in ipairs(ALL_OPTION_CATEGORIES) do buckets[category] = {} end
+  local legendaryMaster = {}
   local uncategorized = {}
+  local customLegendary = LegendaryVisualsPreset.mode() == "custom"
   for _, row in ipairs(rows) do
-    local category = row.optionSetting and OPTION_CATEGORY[row.optionSetting]
-    local bucket = category and buckets[category] or uncategorized
-    bucket[#bucket + 1] = row
+    local setting = row.optionSetting
+    local category = setting and OPTION_CATEGORY[setting]
+    local bucket
+    if setting == LegendaryVisualsPreset.setting then
+      bucket = legendaryMaster
+    elseif setting and LegendaryVisualsPreset.isMember(setting) and not customLegendary then
+      bucket = nil
+    else
+      bucket = category and buckets[category] or uncategorized
+    end
+    if bucket then bucket[#bucket + 1] = row end
   end
 
   local out = {}
@@ -1274,7 +1293,12 @@ local function categorizedRows(rows)
       id = id, label = category.label, group = true, members = members,
       -- Conditional rows can change while a parent page remains on the stack;
       -- OPEN stays truthful while activation resolves the fresh member list.
-      value = function() return "OPEN" end,
+      value = function()
+        if category == LEGENDARY_ROOT then
+          return string.upper(LegendaryVisualsPreset.mode())
+        end
+        return "OPEN"
+      end,
       activate = function(game)
         -- Parent menus stay on the stack while a child is open. Resolve this
         -- page again at activation time so a parent snapshot cannot hide rows
@@ -1290,6 +1314,7 @@ local function categorizedRows(rows)
     }
   end
   local legendary = {}
+  for _, row in ipairs(legendaryMaster) do legendary[#legendary + 1] = row end
   for _, category in ipairs(LEGENDARY_CATEGORIES) do
     local members = buckets[category]
     if #members > 0 then
@@ -1671,7 +1696,8 @@ mod.events:on("mod.options_changed", function(payload)
   for _, entry in ipairs(SETTINGS) do
     if payload.key == entry[1].key then entry[1]:sync(payload.value) end
   end
-  CommunityVisuals.changed(payload.key)
+  local presetHandled = LegendaryVisualsPreset.changed(payload.key)
+  if not presetHandled then CommunityVisuals.changed(payload.key) end
   LegendaryPokeballs.changed()
   -- 3D-BTL switched on from the manager's page pins BATTLE LAYOUT exactly as
   -- the OPTIONS row does. The manager persists its own value; this is the one
@@ -1858,6 +1884,7 @@ do
       local hadBattleArt = BattleArt.setting:get()
       local hadPokeballs = PokeballSettings.active()
       local hadPokeballPreset = PokeballSettings.preset:get()
+      local hadLegendaryMode = LegendaryVisualsPreset.mode()
       local wasOn = idAt(self, self.index)
       inner(self, dt)
       BattleArt.forceRomPlayer(self.game)
@@ -1868,7 +1895,8 @@ do
       if crossedFull or OverworldBattle.enabled() ~= hadBattles
          or hasBattleArt ~= hadBattleArt
          or PokeballSettings.active() ~= hadPokeballs
-         or PokeballSettings.preset:get() ~= hadPokeballPreset then
+         or PokeballSettings.preset:get() ~= hadPokeballPreset
+         or LegendaryVisualsPreset.mode() ~= hadLegendaryMode then
         local rebuilt = OptionsMenu.new(self.game)
         if self.dramaticShapeCategory then
           local group = findOptionGroup(rebuilt.view or rebuilt.rows,
@@ -2080,6 +2108,7 @@ end)
 -- default while leaving an explicitly saved OFF untouched.
 mod.events:on("save.loaded", function(payload)
   local save = payload and payload.save
+  LegendaryVisualsPreset.migrate(require("src.core.Game"), save)
   if save and Voxel.seedOptions(save.options) then
     require("src.render.Pipelines").applyOptions(save.options)
   end

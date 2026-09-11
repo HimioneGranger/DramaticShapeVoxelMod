@@ -219,6 +219,7 @@ function namespace.require(name)
   if name == 'q57/Ballistics' then return assert(loadfile('lib/q57/Ballistics.lua'))() end
   if name == 'SuccessStars' or name == 'EmberLegacyAudio' then return {} end
   if name == 'GameCorner' or name == 'LegendaryGarden' then return {draw = function() end} end
+  if name == 'LegendaryTowerExterior' then return {drawMap = function() return false end} end
   if name == 'CommunityVisuals' then return {
     customForest = function() return false end, customTrees = function() return false end,
   } end
