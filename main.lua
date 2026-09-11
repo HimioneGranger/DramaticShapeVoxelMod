@@ -1140,7 +1140,8 @@ local LEGENDARY_CATEGORIES = {
     CommunityVisuals.signs, CommunityVisuals.cutTrees,
   } },
   { id = "legendary_nature", label = "GRASS & TREES", settings = {
-    CommunityVisuals.cityGround, CommunityVisuals.grass, CommunityVisuals.trees,
+    CommunityVisuals.cityGround, CommunityVisuals.grass,
+    CommunityVisuals.trees, CommunityVisuals.treeDetail,
     CommunityVisuals.forest, ForestAtmos.setting,
   } },
   { id = "legendary_structures", label = "ROADS & STRUCTURES", settings = {
