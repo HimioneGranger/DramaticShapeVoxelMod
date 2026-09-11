@@ -485,3 +485,7 @@ unchanged. This is visual-only; collision, source tiles, warps and encounters
 are untouched. The Route 10 body cache revision is now
 `route10-lavender-approach-v3-exit-lawn` so an older sandy seam mesh cannot be
 reused.
+
+Release follow-up: after in-engine confirmation that the Route 10 exit lawn fix
+worked, the user explicitly approved bumping both version surfaces to `1.10.7`
+and tagging that new branch head as `1.10.7`.
