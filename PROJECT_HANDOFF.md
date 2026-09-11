@@ -467,3 +467,21 @@ Interface checks 3174 plus 5 modern replay checks pass; Lua syntax and whitespac
 pass. Deployed InterfaceSprites, CharacterRenderers, VoxelScene with backup
 and verified hashes. Phone reflection visual verification remains pending.
 Uncommitted; published master/tag not moved.
+# Exact Lavender north-exit bald-square fix - 2026-09-10
+
+The in-engine screenshot finally identified the remaining bald patch precisely:
+it is NOT the Lavender sign floor and NOT the Pokemon Tower flowerbed claim.
+It is Route 10's southernmost source block at block coordinate `(4,35)`, block
+`$31`, which expands to tiles `x16..19 / y140..143` and is entirely tile `$39`.
+Because Route 10 is rendered as Lavender's northern neighbour, Battle Art's
+broad sandy cave-to-Lavender approach treatment was painting that 32x32 seam
+block as an isolated dirt square inside Lavender's otherwise green lawn.
+
+`ChunkMesher` now treats exactly that one authored Route 10 seam block as plain
+grass in BOTH Battle Art and Legendary, before the generic `$39` path branch.
+The rest of Route 10's sandy Battle Art approach is unchanged, Lavender's
+checker/path network is unchanged, and the large Pokemon Tower flower square is
+unchanged. This is visual-only; collision, source tiles, warps and encounters
+are untouched. The Route 10 body cache revision is now
+`route10-lavender-approach-v3-exit-lawn` so an older sandy seam mesh cannot be
+reused.

@@ -239,6 +239,27 @@ check(route10CityToggleN == route10BattleApproachN
     and same(route10CityToggle, route10BattleApproach),
   'Route 10 approach remains independent of the CITY GROUND setting')
 
+-- Route 10's bottom block (block x4/y35, tiles x16..19/y140..143) is the
+-- exact Lavender north-exit apron seen as the isolated bald square in-engine.
+-- Its source is all $39 path art, but both visual modes intentionally render
+-- this one seam block as the same plain grass donor used by Lavender's lawn.
+local route10ExitBattle, route10ExitBattleN = signature(
+  'ROUTE_10', false, false, 57, false, 140, 36, false, false, 16, 10)
+local route10ExitLegendary, route10ExitLegendaryN = signature(
+  'ROUTE_10', false, true, 57, false, 140, 36, false, false, 16, 10)
+local route10ExitGrass, route10ExitGrassN = signature(
+  'PALLET_TOWN', false, true, 44, false, 140, 36, false, false, 16, 10)
+local route10ExitWestPath, route10ExitWestPathN = signature(
+  'ROUTE_10', false, false, 57, false, 140, 36, false, false, 15, 10)
+check(route10ExitBattleN == route10ExitLegendaryN
+    and route10ExitBattleN == route10ExitGrassN
+    and same(route10ExitBattle, route10ExitLegendary)
+    and same(route10ExitBattle, route10ExitGrass),
+  'Route 10 Lavender exit block is plain grass in both visual modes')
+check(route10ExitWestPathN == route10ExitBattleN
+    and not same(route10ExitWestPath, route10ExitBattle),
+  'Route 10 exit-lawn override is limited to the authored 4x4 seam block')
+
 local route10BattleTowerLawn, route10BattleTowerLawnN = signature(
   'ROUTE_10', false, false, 90, true, 132, 36, false, true)
 local route10LegendaryTowerLawn, route10LegendaryTowerLawnN = signature(
@@ -291,8 +312,8 @@ check(route10Cache == fingerprint('ROUTE_10', true, false),
   'Route 10 is not a CITY GROUND cache dependency')
 check(route10Cache ~= fingerprint('ROUTE_10', false, true),
   'Route 10 interior terrain remains a global GRASS cache dependency')
-check(route10Cache:find('route10-lavender-approach-v2-tower-lawn', 1, true) ~= nil,
-  'Route 10 body cache fingerprints the new cave-to-Lavender coverage')
+check(route10Cache:find('route10-lavender-approach-v3-exit-lawn', 1, true) ~= nil,
+  'Route 10 body cache fingerprints the Lavender exit-lawn seam override')
 local route10Aux = Disk.fingerprint(cacheMap('ROUTE_10'), 'aux', nil, 'aux')
 check(route10Aux:find('route10-tower-flowerbed-v2-baseline', 1, true) ~= nil,
   'Route 10 auxiliary cache fingerprints the baseline Tower flowerbed geometry')

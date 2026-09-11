@@ -543,7 +543,7 @@ function Disk.fingerprint(map, slot, masks, kind)
   if mapId == "ROUTE_10" then
     -- The final eleven block rows share the cave-to-Lavender treatment.
     -- The Tower lawn is body geometry and the baseline flowerbed lives in AUX.
-    parts[#parts + 1] = "route10-lavender-approach-v2-tower-lawn"
+    parts[#parts + 1] = "route10-lavender-approach-v3-exit-lawn"
     if kind == "aux" then
       parts[#parts + 1] = "route10-tower-flowerbed-v2-baseline"
     end

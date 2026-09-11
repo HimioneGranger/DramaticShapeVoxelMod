@@ -887,6 +887,21 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
       and ty >= th - ROUTE10_LAVENDER_APPROACH_ROWS and ty < th
   end
 
+  -- The very bottom Route 10 block at block coordinate (4,35) is the
+  -- Lavender north-exit apron. In the source map it is block $31: a solid
+  -- 4x4 field of tile $39. The broad cave-to-Lavender Battle Art treatment
+  -- deliberately turns Route 10 ground/path donors sandy, which is correct
+  -- for the approach but wrong for this one connection apron: when Route 10
+  -- is drawn as Lavender's neighbour it appears as the isolated 32x32 "bald
+  -- square" immediately north of the checker path. Keep only this authored
+  -- seam block as plain grass in BOTH visual modes. No source/collision data
+  -- is changed; this is a render-material override for the connection seam.
+  local function route10LavenderExitLawnAt(tx, ty)
+    return tileset.id == "OVERWORLD" and mapId == "ROUTE_10"
+      and tx >= 16 and tx <= 19
+      and ty >= th - 4 and ty < th
+  end
+
   -- Pokemon Tower's claim-only Route 10 half is presentation metadata owned
   -- by Buildings. Keep its exposed floor as a small Lavender lawn in BOTH
   -- visual modes: the Legendary option may evolve independently, while the
@@ -2498,11 +2513,11 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
         -- an object stands here; paint its synthesized ground and let the
         -- prebuilt prism quads (appended below) carry the art
         local g = S.ground[k]
-        if route10TowerLandscapeAt(tx, ty) then
-          -- This floor is deliberately independent of the GRASS option. Use
-          -- the current Route 10 grass donor, so Battle Art keeps its own
-          -- atlas colour while Legendary keeps its already-approved bright
-          -- palette. The building/flower claims and collision remain intact.
+        if route10TowerLandscapeAt(tx, ty) or route10LavenderExitLawnAt(tx, ty) then
+          -- These Lavender-edge floors are deliberately independent of the
+          -- GRASS option. Use Route 10's grass donor for both the Tower claim
+          -- and the exact south-connection apron; claims/collision remain
+          -- intact and the rest of the Battle Art approach stays sandy.
           kantoGrassTop(tx, ty, tx * 8, ty * 8, 0,
                         aoShades(tx, ty, 0, 1))
         elseif g then
@@ -2732,6 +2747,11 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
                             1, topTile,
                             (tile == 34 or topTile == 34)
                               and "healing" or false)
+          elseif route10LavenderExitLawnAt(tx, ty) and s.class == "ground" then
+            -- This must win before the generic $39 path branch below. The
+            -- authored seam block is entirely $39, but visually it belongs to
+            -- Lavender's plain lawn rather than the checker/path network.
+            kantoGrassTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))
           elseif paved == "path" then
             kantoPavedTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))
           elseif paved == "wood" then
