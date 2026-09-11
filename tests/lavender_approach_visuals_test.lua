@@ -22,7 +22,7 @@ local Buildings = assert(loadfile('lib/Buildings.lua'))({
 local S = {
   outdoor = false, objectQuads = {}, shapeAt = {}, tileAt = {}, skip = {}, ground = {},
 }
-for z = 19, 28 do
+for z = 19, 32 do
   for x = 9, 22 do
     local k = key(x, z)
     S.shapeAt[k] = { flat = true, class = 'ground' }
@@ -31,13 +31,13 @@ for z = 19, 28 do
 end
 local original = {}
 for k, v in pairs(S.tileAt) do original[k] = v end
-Buildings.stamp(S, { id = 'ROUTE_10' }, {}, 10, 20, 12, 8,
+Buildings.stamp(S, { id = 'ROUTE_10' }, {}, 10, 20, 12, 12,
   { id = 'pokemon_tower_top', claimOnly = true })
 check(S.lavenderFlowerbed ~= nil, 'Route 10 Tower-top claim records a flowerbed footprint')
 eq(S.lavenderFlowerbed.minX, 10, 'flowerbed keeps matched west edge')
 eq(S.lavenderFlowerbed.maxX, 21, 'flowerbed keeps matched east edge')
 eq(S.lavenderFlowerbed.minY, 20, 'flowerbed keeps matched north edge')
-eq(S.lavenderFlowerbed.maxY, 27, 'flowerbed keeps matched south edge')
+eq(S.lavenderFlowerbed.maxY, 31, 'flowerbed keeps matched south edge')
 for k, v in pairs(original) do
   eq(S.tileAt[k], v, 'flowerbed discovery never rewrites source map tiles')
 end
@@ -82,7 +82,7 @@ local map = {
 }
 local function flowerbedFixture()
   return {
-    lavenderFlowerbed = { minX = 10, maxX = 21, minY = 20, maxY = 27 },
+    lavenderFlowerbed = { minX = 10, maxX = 21, minY = 20, maxY = 31 },
     flowerQuads = {},
   }
 end
@@ -91,11 +91,11 @@ local battleBed = flowerbedFixture()
 local battleEmitted = Structures.buildLavenderFlowerbed(battleBed, map, pixels)
 check(battleEmitted > 0 and #battleBed.flowerQuads == battleEmitted,
   'Battle Art keeps the approved Lavender flowerbed standees')
-eq(blockedCalls, 12 * 8,
+eq(blockedCalls, 12 * 12,
   'Battle Art flowerbed checks every candidate collision cell')
--- 48 checkerboard positions minus the two even-parity 8px tiles in the one
+-- 72 checkerboard positions minus the two even-parity 8px tiles in the one
 -- walkable 16px collision cell; the fully-dark template emits 17 quads each.
-eq(battleEmitted, 46 * 17,
+eq(battleEmitted, 70 * 17,
   'Battle Art flowerbed preserves the existing blocked checkerboard exactly')
 
 grassMode = true
@@ -104,7 +104,7 @@ local legendaryBed = flowerbedFixture()
 local legendaryEmitted = Structures.buildLavenderFlowerbed(legendaryBed, map, pixels)
 check(legendaryEmitted > 0 and #legendaryBed.flowerQuads == legendaryEmitted,
   'Legendary keeps the same approved Lavender flowerbed geometry')
-eq(blockedCalls, 12 * 8,
+eq(blockedCalls, 12 * 12,
   'Legendary flowerbed checks every candidate collision cell')
 eq(legendaryEmitted, battleEmitted,
   'Battle Art and Legendary flowerbed density remain identical')
