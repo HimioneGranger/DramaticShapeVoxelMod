@@ -1,4 +1,4 @@
-﻿-- Overworld battles: one frame of the arena, as geometry.
+-- Overworld battles: one frame of the arena, as geometry.
 --
 -- The same world the free-roam mode draws, from a placed camera instead of
 -- the orbit, at the WINDOW's own pixel resolution -- not the GB's. The
@@ -74,6 +74,10 @@ BattleScene.capture = nil
 -- to prove the event timing + 3D draw path before suppressing the old sprite.
 local Pokeball = V.require("Pokeball")
 local PokeballSettings = V.require("PokeballSettings")
+local Q57 = V.require("q57/Adapter")
+local Ballistics = V.require("q57/Ballistics")
+local SuccessStars = V.require("SuccessStars")
+local EmberAudio=V.require("EmberLegacyAudio")
 -- TEST64B: this local must be declared HERE, before every function that uses it.
 -- startNormalBall(), normalBallTick(), and monCards() now all close over the
 -- exact same normalBall upvalue.
@@ -107,6 +111,8 @@ function BattleScene.startNormalBall(ballId, caught, shakes, owner)
     postCloseHideT = nil,
     owner = owner, -- TEST66: owning BattleState, shared with Stadium Battle FX
   }
+  EmberAudio.beginCapture(owner)
+  ball.emberAudio=true
   ball.spin = 5.0
   ball.tumble = 8.0
   return true
@@ -117,15 +123,22 @@ local function clearExternalIntake(n)
   if type(owner) == "table" then
     owner.dramaticShape3DBallIntake = nil
     owner.dramaticShape3DBallHide = nil
+    owner.legendaryBreakoutPose = nil
   end
 end
 
 function BattleScene.cancelNormalBall()
+  EmberAudio.clear()
+  SuccessStars.invalidate()
+  Q57.clear()
   clearExternalIntake(normalBall)
   normalBall = nil
 end
 
 function BattleScene.finishNormalBattleBall()
+  EmberAudio.clear()
+  SuccessStars.invalidate()
+  Q57.clear()
   clearExternalIntake(normalBall)
   normalBall = nil
 end
@@ -147,15 +160,19 @@ function BattleScene.normalBallAnimEvent(moveId)
   end
 
   if moveId == "SHAKE_ANIM" then
-    -- TEST42: one SHAKE_ANIM contains every capture shake. Enter the closed,
-    -- grounded state here, but do not rock yet: AnimPlayer emits one
-    -- SFX_TINK event for each real shake, after any animation load frames.
-    -- LegendaryPokeballs forwards those timed events below.
+    -- REBOUND TEST13: one SHAKE_ANIM contains every capture shake.  Closing
+    -- the ball also starts a short physical drop/rebound sequence so the
+    -- shell does not appear magnetically planted on the floor before the
+    -- first engine-timed rock.  SFX_TINK still owns the actual capture rocks.
     n.phase = "shake_wait"
     n.captureOpened = true
     n.captureClosed = true
     n.captureFxT = 0
     n.hideEnemyForCapture = true
+    if not n.reboundStart then
+      local clock = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.clock()
+      n.reboundStart = clock
+    end
     n.ball:close()
     return true
   end
@@ -165,7 +182,7 @@ function BattleScene.normalBallAnimEvent(moveId)
     n.postCloseHideT = nil
     if not n.escapeEvent then
       n.escapeEvent = true
-      n.escapePendingT = 0.04
+      n.escapePendingT = 0 -- SHOWPIC is the common reveal/burst edge.
       n.phase = "escape_pending"
     end
     return true
@@ -204,7 +221,45 @@ function BattleScene.normalBallCaughtEvent()
   n.ball:close()
   n.ball.spin, n.ball.tumble = 0, 0
   n.ball:catchClick()
+  n.successStarStart = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.clock()
   return true
+end
+
+-- REBOUND TEST13 ---------------------------------------------------------
+-- A closed capture ball begins 6.5 world-pixels above its resting centre.
+-- Let gravity carry it to the floor and reflect the impact velocity twice
+-- with diminishing restitution.  This is deliberately a tiny visual physics
+-- layer only: engine capture/shake timing remains authoritative.
+local REBOUND_G = 156.96         -- q57 gravity: 9.81 m/s^2 * 16 world px/m
+local REBOUND_DROP = 6.5         -- existing suspended capture height
+local REBOUND_E1 = 0.40          -- first ground rebound
+local REBOUND_E2 = 0.24          -- second, softer rebound
+
+local function reboundHeight(age)
+  if not age or age < 0 then return REBOUND_DROP, false end
+  -- Initial free-fall from the closed/intake position.
+  local hitT = math.sqrt((2 * REBOUND_DROP) / REBOUND_G)
+  if age < hitT then
+    return math.max(0, REBOUND_DROP - 0.5 * REBOUND_G * age * age), true
+  end
+
+  local impactV = REBOUND_G * hitT
+  local t = age - hitT
+  local v1 = impactV * REBOUND_E1
+  local flight1 = (2 * v1) / REBOUND_G
+  if t < flight1 then
+    return math.max(0, v1 * t - 0.5 * REBOUND_G * t * t), true
+  end
+
+  t = t - flight1
+  local impact1 = v1
+  local v2 = impact1 * REBOUND_E2
+  local flight2 = (2 * v2) / REBOUND_G
+  if t < flight2 then
+    return math.max(0, v2 * t - 0.5 * REBOUND_G * t * t), true
+  end
+
+  return 0, false
 end
 
 local function normalBallTick(arena, groundY)
@@ -218,7 +273,12 @@ local function normalBallTick(arena, groundY)
   local now = (love and love.timer and love.timer.getTime and love.timer.getTime()) or os.clock()
   local dt = n.last and math.max(0, math.min(0.08, now - n.last)) or (1/60)
   n.last = now
-  n.t = n.t + dt
+  EmberAudio.sync(n.owner)
+  if not n.started and not n.captureOpened then
+    EmberAudio.capture("throw");EmberAudio.capture("trail")
+  end
+  n.started=n.started or now
+  n.t = math.max(0,now-n.started)
 
   -- TEST56: Pokeball.lua can now safely know whether it is actually airborne.
   n.ball.phase = n.phase
@@ -234,6 +294,26 @@ local function normalBallTick(arena, groundY)
 
     if n.captureFxT <= 0 and n.captureOpened and not n.captureClosed then
       n.hideEnemyForCapture = true
+      n.closeAfterIntake = PokeballSettings.openHold()
+    end
+  end
+
+  -- Close from the completed intake, independently of animation loading
+  -- or the first shake. Engine shake/audio events retain their own timing.
+  if n.closeAfterIntake then
+    if n.escapeEvent or n.captureClosed then
+      n.closeAfterIntake = nil
+    else
+      n.closeAfterIntake = math.max(0, n.closeAfterIntake - dt)
+      if n.closeAfterIntake <= 0 then
+        n.closeAfterIntake = nil
+        n.captureClosed = true
+        -- REBOUND TEST13: the intake closes with the ball still suspended
+        -- above the arena.  Start the landing clock here; SHAKE_ANIM may also
+        -- be the first close edge on some backends, and handles the same clock.
+        n.reboundStart = n.reboundStart or now
+        n.ball:close(12.5)
+      end
     end
   end
 
@@ -255,10 +335,14 @@ local function normalBallTick(arena, groundY)
     if n.captureOpened and not n.captureClosed and n.captureFxT and n.captureFxT > 0 then
       local remain = math.max(0, math.min(1, n.captureFxT / PokeballSettings.captureDuration()))
       local raw = 1 - remain
-      local q = raw * raw * (3 - 2 * raw)
+      -- Brief full-size color charge, then the existing intake within the same duration.
+      local motion = math.max(0, math.min(1, (raw - 0.18) / 0.82))
+      local q = motion * motion * (3 - 2 * motion)
       n.owner.dramaticShape3DBallIntake = {
         active = true,
         progress = q,
+        color = {1, 0.08, 0.30},
+        colorAmount = math.min(1, raw / 0.12),
         scale = math.max(0.055, 1 - 0.945*q),
         pull = q*q,
         hide = n.hideEnemyForCapture == true,
@@ -292,7 +376,8 @@ local function normalBallTick(arena, groundY)
       n.finished = true
       n.phase = "escape"
       n.ball:burst()
-      if n.ball.breakoutBurst then n.ball:breakoutBurst() end
+      n.escapeAge = 0
+      n.escapeStarted = now
     end
   end
 
@@ -325,21 +410,20 @@ local function normalBallTick(arena, groundY)
   -- Same 0.72s throw arc, now from Ash to the enemy instead of from the
   -- active Pokemon slot.  The longer travel distance should make the arc
   -- read naturally with Ash standing far in the background.
-  local throwT = 0.72
+  local throwT = Ballistics.THROW_SECONDS
+  if not n.flight then
+    n.flight=Ballistics.launch({startX,startY,startZ},{e[1],groundY+R+6.5,e[2]},throwT)
+    -- Sample once: the button faces the thrower after the airborne tumble.
+    n.flightYaw=math.atan2(startX-e[1],startZ-e[2])
+  end
   -- TEST41: POOF/HIDEPIC is the engine's real contact/intake event and owns
   -- the matching native sound. If it arrives before the cosmetic 0.72s arc
   -- ends, finish the arc immediately instead of flying open; if it arrives
   -- later, hold the closed ball at contact rather than starting the visual
   -- intake ahead of the audio.
   if n.t < throwT and not n.captureOpened then
-    local q = n.t / throwT
-    local s = q*q*(3-2*q)
-    n.ball.pos[1] = startX + (e[1]-startX) * s
-    n.ball.pos[3] = startZ + (e[2]-startZ) * s
-    n.ball.pos[2] = startY + ((groundY + R + 6.5)-startY) * s
-                    + math.sin(math.pi*q) * 10
-    n.ball.yaw = math.atan2((Voxel3D.eye and Voxel3D.eye[1] or 0)-n.ball.pos[1],
-                            (Voxel3D.eye and Voxel3D.eye[3] or 1)-n.ball.pos[3])
+    n.ball.pos[1],n.ball.pos[2],n.ball.pos[3]=Ballistics.sample(n.flight,n.t)
+    n.ball.yaw=n.flightYaw
     return
   end
 
@@ -350,26 +434,56 @@ local function normalBallTick(arena, groundY)
     n.ball.spin, n.ball.tumble = 0, 0
     n.ball.pos[1], n.ball.pos[3] = e[1], e[2]
     n.ball.pos[2] = groundY + R + 6.5
-    n.ball.yaw = math.atan2((Voxel3D.eye and Voxel3D.eye[1] or 0)-n.ball.pos[1],
-                            (Voxel3D.eye and Voxel3D.eye[3] or 1)-n.ball.pos[3])
+    n.ball.yaw = n.flightYaw
     return
   end
 
   if n.phase == "capture_open" and n.captureFxT and n.captureFxT > 0 then
     n.ball.pos[1], n.ball.pos[3] = e[1], e[2]
     n.ball.pos[2] = groundY + R + 6.5
-    n.ball.yaw = math.atan2((Voxel3D.eye and Voxel3D.eye[1] or 0)-n.ball.pos[1],
-                            (Voxel3D.eye and Voxel3D.eye[3] or 1)-n.ball.pos[3])
+    n.ball.yaw = n.flightYaw
     return
   end
 
-  -- Rest under the foe after the intake beat.
-  -- choreography; later builds will sync opening/beam/breakout to vanilla.
-  n.ball.spin, n.ball.tumble = 0, 0
+  -- REBOUND TEST13: after capture closes, physically drop the shell from its
+  -- intake height, rebound once clearly, then make a smaller second hop before
+  -- settling.  Preserve a little face-axis roll while it still has energy so
+  -- the ball never reads as a dead/stagnant prop after ground contact.
+  local reboundY, rebounding = 0, false
+  if n.captureClosed then
+    n.reboundStart = n.reboundStart or now
+    local age=now-n.reboundStart
+    reboundY, rebounding = reboundHeight(age)
+    if not n.escapeEvent and not n.caughtEvent then
+      local hit=math.sqrt(2*REBOUND_DROP/REBOUND_G)
+      local hop=2*hit*REBOUND_E1
+      local beats={hit,hit+hop,hit+hop+hop*REBOUND_E2}
+      for i,t in ipairs(beats)do
+        if age>=t and (n.emberLand or 0)<i then
+          n.emberLand=i
+          -- Skip stale contacts after a stall; never stack three impacts at once.
+          if age-t<.10 then EmberAudio.capture(i<=2 and "land" or "bounce",i) end
+        end
+      end
+    end
+  end
+  -- TEST14: keep the button/ring camera-facing during the rebound.
+  -- TEST13 added tumble/roll velocity here, but those rotations accumulate in
+  -- Pokeball:matrix(); after the bounce the red button could be left facing
+  -- away from the camera even though the capture pulse was still active.
+  -- The rebound now stays translational only, while the engine-owned wobble
+  -- still supplies the later capture shakes.
+  n.ball.spin = 0
+  n.ball.tumble = 0
+  n.ball.roll = 0
+  if n.captureClosed then
+    n.ball.spinAngle = 0
+    n.ball.tumbleAngle = 0
+    n.ball.rollAngle = 0
+  end
   n.ball.pos[1], n.ball.pos[3] = e[1], e[2]
-  n.ball.pos[2] = groundY + R
-  n.ball.yaw = math.atan2((Voxel3D.eye and Voxel3D.eye[1] or 0)-n.ball.pos[1],
-                          (Voxel3D.eye and Voxel3D.eye[3] or 1)-n.ball.pos[3])
+  n.ball.pos[2] = groundY + R + reboundY
+  n.ball.yaw = n.flightYaw
 
   local after = n.t - throwT
   -- TEST41: SHAKE_ANIM now drives every visible rock above. Retain only a
@@ -388,7 +502,10 @@ local function normalBallTick(arena, groundY)
     n.escapeEvent = true
     n.finished = true
     n.phase = "escape"
+    n.hideEnemyForCapture = false
+    n.captureClosed, n.captureFxT = true, 0
     n.ball:burst()
+    n.escapeAge = 0
   end
 
   -- TEST4 lifecycle:
@@ -396,8 +513,21 @@ local function normalBallTick(arena, groundY)
   -- Keep it alive until BattleScene reset/new throw explicitly clears it.
   -- Failed throws can still self-clean shortly after breakout.
   if not n.caught and n.escapeEvent then
-    local life = endAt + 2.40
-    if after > life then normalBall = nil end
+    -- Smoke has staggered emission: let the last puff finish, measured
+    -- from breakout rather than the throw or asset-loading delay.
+    if n.phase == "escape" then
+      n.escapeStarted=n.escapeStarted or now
+      n.escapeAge = math.max(0,now-n.escapeStarted)
+      if n.owner then
+        local q = math.min(1, n.escapeAge / 0.126)
+        n.owner.legendaryBreakoutPose = {scale=0.08+0.92*q*q*(3-2*q),
+          amount=math.max(0,1-n.escapeAge/0.126)}
+      end
+      if n.escapeAge > 0.20 and not n.ball.breakoutPuffs then
+        clearExternalIntake(n)
+        normalBall = nil
+      end
+    end
   end
 end
 
@@ -590,7 +720,9 @@ local function monCards(arena, groundY, textures)
         local duration = math.max(0.001, PokeballSettings.captureDuration())
         local raw = 1 - math.max(0, math.min(1,
           normalBall.captureFxT / duration))
-        local q = raw * raw * (3 - 2 * raw)
+        -- Brief full-size color charge, then the existing intake within the same duration.
+      local motion = math.max(0, math.min(1, (raw - 0.18) / 0.82))
+      local q = motion * motion * (3 - 2 * motion)
         local k = math.max(0.06, 1 - 0.94 * q)
         local ax, ay, az = cell[1], groundY + 8, cell[2]
         local bx = normalBall.ball.pos[1]
@@ -662,6 +794,8 @@ local function castShadows(state, arena, terrain, nbMesh, cx, cy, vw, vh,
   if not ShadowMap.begin(cx, cy, vw, vh) then return end
 
   ShadowMap.draw(terrain, atlasFor(host), nil)
+  V.require("GameCorner").draw(host, ShadowMap)
+  for _,nb in ipairs(neighbors)do V.require("LegendaryGarden").draw(nb.map,ShadowMap,Mat4.translate(nb.ox,0,nb.oy))end
   for i, nb in ipairs(neighbors) do
     ShadowMap.draw(nbMesh[i], atlasFor(nb.map), Mat4.translate(nb.ox, 0, nb.oy))
   end
@@ -762,8 +896,65 @@ function BattleScene.toGB(vp, wx, wy, wz, lx, ly, s, pw, ph)
   return (px - lx) / s, (py - ly) / s
 end
 
+-- Entrance release has its own clock, independent of breakout particles.
+local sendoutOwner, sendoutSides = nil, {}
+local function updateSendout(battle)
+  if not battle then return end
+  if sendoutOwner ~= battle then
+    if sendoutOwner then sendoutOwner.legendaryReleasePose = nil end
+    sendoutOwner, sendoutSides = battle, {}
+  end
+  battle.legendaryReleasePose = {}
+  if not PokeballSettings.active() then sendoutSides={}; return end
+  local now = love.timer.getTime()
+  for _,side in ipairs({"player","enemy"}) do
+    local battler = battle[side]
+    local entry = sendoutSides[side]
+    if not entry or entry.battler~=battler then
+      entry={battler=battler}; sendoutSides[side]=entry
+    end
+    local grow
+    if battler and type(battle.growInScale)=="function" then
+      local ok,value=pcall(battle.growInScale,battle,battler)
+      if ok then grow=value end
+    end
+    local growing=type(grow)=="number" and grow<1
+    local capturing=battle._legendaryBallSequence or battle._dsBallSequenceActive
+    local eligible=side=="player" or battle.kind~="wild"
+    local provider=battle.legendaryModelRelease
+    local cue=provider and provider[side]
+    local start=cue and cue.battler==battler and cue.started or nil
+    local fresh=provider and start and start~=entry.cueStarted
+      or not provider and growing and not entry.wasGrowing
+    if eligible and battler and fresh and not capturing then
+      entry.emberClosed=nil
+      entry.shell=Pokeball.new("POKE_BALL")
+      entry.shell.scale=math.max(0.85,entry.shell.scale)
+      entry.started=start or now
+      entry.cueStarted=start
+      entry.age,entry.last=math.max(0,now-entry.started),now
+    end
+    entry.wasGrowing=growing
+    if entry.shell then
+      local dt=math.max(0,math.min(0.08,now-(entry.last or now)))
+      entry.last=now; entry.age=math.max(0,now-entry.started)
+      entry.shell:update(dt)
+      if entry.age<0.44 then
+        local q=math.min(1,entry.age/0.28)
+        battle.legendaryReleasePose[side]={scale=0.08+0.92*q*q*(3-2*q),
+          amount=math.max(0,1-math.max(0,entry.age-0.28)/0.16)}
+      end
+      if entry.age>=1.15 and not entry.emberClosed then
+        entry.emberClosed=true;EmberAudio.play("close")
+      end
+      if entry.age>=Q57.releaseDuration then entry.shell=nil end
+    end
+  end
+end
 -- Shared by voxel arenas and the Stadium flat-scene overlay.
 function BattleScene.drawTrainerAndBall(state, battle, arena, groundY)
+  local q57Drawn=Q57.draw(battle)
+  -- Entrance uses q57 release energy only; no legacy smoke fallback.
   local providerTrainer = false
   if CharacterRenderers.battleActive() then
     providerTrainer = CharacterRenderers.first("drawBattleTrainer", {
@@ -795,14 +986,31 @@ function BattleScene.drawTrainerAndBall(state, battle, arena, groundY)
   -- lighting and shadows. Its intake beam follows the opponent's moving
   -- chest so there is no flat duplicate ball or detached overlay.
   if normalBall and normalBall.ball then
-    pcall(normalBall.ball.draw, normalBall.ball, BattleBillboard.PULL)
-    if normalBall.captureFxT and normalBall.captureFxT > 0
+    if normalBall.phase == "escape" and not q57Drawn and not normalBall.q57Used then
+      -- Draw smoke directly: shell highlights/celebrations cannot interrupt
+      -- the breakout puff pass, and the spent ball leaves with the burst.
+      pcall(normalBall.ball.drawSmokeOnly, normalBall.ball, BattleBillboard.PULL)
+    elseif normalBall.phase ~= "escape" then
+      pcall(normalBall.ball.draw, normalBall.ball, BattleBillboard.PULL)
+      -- Q58: success acknowledgement is renderer-native physical star geometry.
+      -- It starts only on the engine-confirmed caught edge and is drawn after
+      -- the ball, world-horizontal, so rebound/button orientation is untouched.
+      if normalBall.successStarStart then
+        local clock=(love and love.timer and love.timer.getTime and love.timer.getTime()) or os.clock()
+        local age=clock-normalBall.successStarStart
+        pcall(SuccessStars.draw, age, normalBall.ball, BattleBillboard.PULL,
+          normalBall.owner and normalBall.owner.frame)
+      end
+    end
+    if not q57Drawn and normalBall.captureFxT and normalBall.captureFxT > 0
         and arena and arena.enemy then
       local duration = math.max(0.001, PokeballSettings.captureDuration())
       local remain = math.max(0, math.min(1,
         normalBall.captureFxT / duration))
       local raw = 1 - remain
-      local q = raw * raw * (3 - 2 * raw)
+      -- Brief full-size color charge, then the existing intake within the same duration.
+      local motion = math.max(0, math.min(1, (raw - 0.18) / 0.82))
+      local q = motion * motion * (3 - 2 * motion)
       local ax, ay, az = arena.enemy[1], groundY + 8, arena.enemy[2]
       local bx = normalBall.ball.pos[1]
       local by = normalBall.ball.pos[2]
@@ -825,6 +1033,8 @@ function BattleScene.renderHostedExtras(state, arena, battle, ctx)
       and ctx.camera.focus and ctx.target) then return false end
   local groundY = BattleScene.groundY(arena.map or state.map, arena)
   normalBallTick(arena, groundY)
+  updateSendout(battle)
+  Q57.prepare(battle,arena,groundY,normalBall,sendoutSides)
   local origin = {arena.mid[1], groundY, arena.mid[2]}
   local oldVP = Voxel3D.vp
   local oldEye, oldFocus, oldCamera = Voxel3D.eye, Voxel3D.focus, Voxel3D.camera
@@ -932,6 +1142,7 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
   Voxel3D.tint = DayNight.tint(outdoor or DayNight.isCanopy(host))
   local GlassMask = V.require("GlassMask")
   Voxel3D.glassMask = outdoor and GlassMask.texture(host.tileset) or nil
+  Voxel3D.streetLamps = nil
   Voxel3D.glassNight = outdoor and DayNight.windowLight() or 0
   -- no glint in the arena: the drift is the shot breathing, not the player
   -- moving, and a shimmer on background windows would fight the mons
@@ -1026,6 +1237,8 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
     or (type(drawActors) == "function" and drawActors or nil)
   local hostedCards = type(drawActors) == "table"
                       and type(drawActors.cards) == "table"
+  updateSendout(battle)
+  Q57.prepare(battle,arena,groundY,normalBall,sendoutSides)
   local cards = (not hostedActors or hostedCards)
                 and monCards(arena, groundY, textures) or {}
   local stadium = hostedActors and {}
@@ -1111,6 +1324,9 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
         WorldUnderlay.draw({ map = host }, cx, cy, battleUnderlay)
       end
       Voxel3D.draw(terrain, atlasFor(host), nil)
+      V.require("GameCorner").draw(host)
+      for _,nb in ipairs(neighbors)do V.require("LegendaryGarden").draw(nb.map,nil,Mat4.translate(nb.ox,0,nb.oy))end
+      Voxel3D.glass(true)
       -- Free roam closes the finite CAVERN map with this same natural-rock
       -- ridge. The pulled-back battle camera needs it too; without it the
       -- battle void can peek through as a bright line at the edge.
@@ -1152,7 +1368,9 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
     pcall(CaveSconces.drawBattle, host)
     pcall(CaveAtmosphere3D.drawBattle, host, arena)
     pcall(ForestDressing.drawBattle, host, neighbors)
+    Voxel3D.battleFoliage(arena, groundY)
     pcall(CommunityFlora.battleProps, host, neighbors, arena)
+    Voxel3D.battleFoliage()
     Voxel3D.glass(true)
     if CommunityVisuals.customForest() or CommunityVisuals.customTrees() then
       pcall(CommunityFlora.battleLeaves, state, host, arena)
@@ -1190,7 +1408,11 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
       -- not dim it. Most visible on the white arena fill, where a darkened
       -- card would read wrong; but it is flat/full-bright everywhere. SHADED
       -- (the default) keeps the tints and its own shadow, as intended.
-      local unlit = UiBackplates.spritesUnlit()
+      local intake = card.side == "enemy" and normalBall and normalBall.owner
+        and normalBall.owner.dramaticShape3DBallIntake
+      local absorbing = type(intake) == "table" and intake.active
+      if absorbing then Voxel3D.flatten(intake.color, intake.colorAmount) end
+      local unlit = absorbing or UiBackplates.spritesUnlit()
       local savedTint = Voxel3D.tint
       if unlit then
         Voxel3D.tint = { 1, 1, 1 }
@@ -1211,6 +1433,11 @@ function BattleScene.render(state, arena, textures, token, battle, drawActors,
         Voxel3D.dayTint()
       end
       if card.noDayTint then Voxel3D.dayTint() end
+      if absorbing then
+        if flashing then
+          Voxel3D.flatten(BattleScene.FLASH_COLOR, BattleScene.FLASH_STRENGTH)
+        else Voxel3D.flatten(nil) end
+      end
     end
 
     -- Trainers, disabled integration and unavailable sides retain the exact

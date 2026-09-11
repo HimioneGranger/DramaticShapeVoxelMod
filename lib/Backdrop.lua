@@ -241,10 +241,40 @@ local function buildUnder()
 end
 
 -- the panorama itself, written next to this module by the companion mod
+-- HORIZON TEST1: repair accidentally transparent painted palette colours.
+-- Only the shipped artwork is repaired; keyed sky/fringe and RGB are preserved.
+local SOLID_PALETTE = {
+  [11777419] = true,
+  [7047855] = true,
+  [6652070] = true,
+  [10327690] = true,
+  [14800531] = true,
+  [4089509] = true,
+  [4808801] = true,
+  [3889249] = true,
+  [2308667] = true,
+  [3230281] = true,
+  [11912337] = true,
+}
+local function restorePaintedAlpha(x, y, r, g, b, a)
+  if a < 0.5 then
+    local key = math.floor(r * 255 + 0.5) * 65536
+              + math.floor(g * 255 + 0.5) * 256
+              + math.floor(b * 255 + 0.5)
+    if SOLID_PALETTE[key] then return r, g, b, 1 end
+  end
+  return r, g, b, a
+end
+
 local function texture()
   if image or failed then return image end
   local ok, img = pcall(function()
     local path = backdropPath()
+    local data = love.image.newImageData(path)
+    local builtin = (V.path or "mods/BATTLE_ART_VOXEL_FORK") .. "/assets/legendary/backdrop.png"
+    if path == builtin and data:getWidth() == 4096 and data:getHeight() == 256 then
+      data:mapPixel(restorePaintedAlpha)
+    end
     -- THE GROUND COLOUR, read once from the art itself: the average of
     -- the panorama's bottom row is the colour its land ends in, and the
     -- skirt and floor are painted in that single flat tone. Stretching
@@ -252,7 +282,6 @@ local function texture()
     -- fields, shore -- into vertical taffy; a plain of one colour reads
     -- as distant ground.
     pcall(function()
-      local data = love.image.newImageData(path)
       local w, h = data:getWidth(), data:getHeight()
       local r, g, b, n = 0, 0, 0, 0
       for x = 0, w - 1, 8 do
@@ -262,9 +291,9 @@ local function texture()
       if n > 0 then
         groundColor = { r / n, g / n, b / n }
       end
-      data:release()
     end)
-    local i = love.graphics.newImage(path)
+    local i = love.graphics.newImage(data)
+    data:release()
     i:setWrap("repeat", "clamp")
     i:setFilter("nearest", "nearest")
     return i

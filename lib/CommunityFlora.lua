@@ -3574,7 +3574,7 @@ function MOUND.drawTreeParts(parts, ox, oz, px, pz, model, treeSway, current,
   -- keeps the partition from multiplying texture/glass state changes.
   for _, part in ipairs(visibleParts) do
     if part.trunks and MOUND.barkImg() then
-      Voxel3D.draw(part.trunks, MOUND.barkImg(), model)
+      Voxel3D.drawFoliage(part.trunks, MOUND.barkImg(), model)
     end
   end
   local mapMask
@@ -3592,7 +3592,7 @@ function MOUND.drawTreeParts(parts, ox, oz, px, pz, model, treeSway, current,
   if current then Voxel3D.glassMaskNow(mapMask) end
   for _, part in ipairs(visibleParts) do
     if part.hoods and MOUND.leafyImg() then
-      Voxel3D.draw(part.hoods, MOUND.leafyImg(), model)
+      Voxel3D.drawFoliage(part.hoods, MOUND.leafyImg(), model)
     end
   end
   local detailModel = treeSway and model and Mat4.mul(model, treeSway)
@@ -3606,7 +3606,7 @@ function MOUND.drawTreeParts(parts, ox, oz, px, pz, model, treeSway, current,
           part.detail:setDrawRange(1, part.detailFarCount)
         else part.detail:setDrawRange() end
       end
-      Voxel3D.draw(part.detail, MOUND.detailImg(), detailModel)
+      Voxel3D.drawFoliage(part.detail, MOUND.detailImg(), detailModel)
     end
   end
   if bakedShadows ~= false then
@@ -7701,16 +7701,16 @@ function Flora.battleProps(host, neighbors, arena)
             model, nil, current, false)
     end
     if slot.trunks and MOUND.barkImg() then
-      pcall(Voxel3D.draw, slot.trunks, MOUND.barkImg(), model)
+      pcall(Voxel3D.drawFoliage, slot.trunks, MOUND.barkImg(), model)
     end
     if slot.stones and MOUND.stoneImg() then
       pcall(Voxel3D.draw, slot.stones, MOUND.stoneImg(), model)
     end
     if slot.hoods and MOUND.leafyImg() then
-      pcall(Voxel3D.draw, slot.hoods, MOUND.leafyImg(), model)
+      pcall(Voxel3D.drawFoliage, slot.hoods, MOUND.leafyImg(), model)
     end
     if slot.detail and MOUND.detailImg() then
-      pcall(Voxel3D.draw, slot.detail, MOUND.detailImg(), model)
+      pcall(Voxel3D.drawFoliage, slot.detail, MOUND.detailImg(), model)
     end
   end
   drawBattleSlot(MOUND.TRUNK.cache[rkT0], 0, 0, true)

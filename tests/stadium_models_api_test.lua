@@ -65,6 +65,7 @@ local V = {mod={
   log=logger,
 }}
 function V.require(name)
+  if name == 'FlyMotion' then return assert(loadfile('lib/FlyMotion.lua'))() end
   return assert(({Mat4=Mat4,BattleArt=BattleArt})[name],name)
 end
 

@@ -32,8 +32,7 @@
 -- consumed as matrix terms at draw time. No skeleton, no keyframes --
 -- lid is a hinge matrix about the back of the equator, the wobble is a
 -- decaying rotateZ about the ground contact point, the caught click is a
--- squash pulse, the stars are one shared quad drawn a few times facing the
--- eye. The ball owns its POSE only; where it IS (the throw arc, the drop)
+-- squash pulse. The ball owns its POSE only; where it IS (the throw arc, the drop)
 -- is the caller's problem, which is what keeps this file a prop and not a
 -- game mode.
 --
@@ -79,7 +78,6 @@ local BURST_RATE = 14           -- the breakout pop is a violent open
 local WOBBLE_T = 0.70           -- TEST20: quicker, more aggressive rock
 local WOBBLE_A = 0.64           -- TEST20: ~37 degrees, much more readable
 local PULSE_T = 0.14            -- the caught click's squash pulse
-local STAR_T = 1.55             -- TEST28: stronger successful-catch linger
 local GLOW_DECAY = 2.2          -- additive glow, per second
 
 -- ------- palette
@@ -216,7 +214,7 @@ local function disc(verts, map, y, radius, slot, row, up)
 end
 
 -- the button: a ring wall and its face, standing out of the shell along +Z
-local function button(verts, map, row)
+local function button(verts, map, row, faceOnly)
   local BLON = 10
   local function ringWall(rad, z0, z1, slot)
     local u, v = uvFor(slot, row)
@@ -242,11 +240,29 @@ local function button(verts, map, row)
       quad(verts, map, centre, a, b, centre)
     end
   end
+  if faceOnly then
+    faceDisc(0.45, R + 0.42, SLOTS.FACE)
+    return
+  end
   -- the wall starts inside the shell so the junction never shows a gap
   ringWall(0.75, R * 0.90, R + 0.30, SLOTS.RING)
   faceDisc(0.75, R + 0.30, SLOTS.RING)
   ringWall(0.45, R + 0.30, R + 0.42, SLOTS.RING)
-  faceDisc(0.45, R + 0.42, SLOTS.FACE)
+end
+
+-- Raised annulus around the button: real geometry in the shell's local space.
+local function buttonRingMesh(row)
+  local vertices,indices={},{}
+  local u,v=uvFor(SLOTS.FACE,row)
+  local inner,outer,z0,z1=.48,.77,R+.305,R+.465
+  local function at(r,a,z)return {r*math.cos(a),r*math.sin(a),z,u,v,1}end
+  for i=0,23 do
+    local a,b=TAU*i/24,TAU*(i+1)/24
+    quad(vertices,indices,at(inner,a,z1),at(outer,a,z1),at(outer,b,z1),at(inner,b,z1))
+    quad(vertices,indices,at(outer,a,z0),at(outer,b,z0),at(outer,b,z1),at(outer,a,z1))
+    quad(vertices,indices,at(inner,b,z0),at(inner,a,z0),at(inner,a,z1),at(inner,b,z1))
+  end
+  return Voxel3D.newMesh(vertices,indices)
 end
 
 -- one tier's meshes, memoised: { base = , lid = , spark = }
@@ -275,33 +291,78 @@ local function meshesFor(ball)
     zone(lv, lm, BAND_LAT, math.pi / 2, LAT, SLOTS.TOP, row)
     disc(lv, lm, 0.06, R * 0.97, SLOTS.INNER, row, false)
 
-    -- TEST45: Master Ball-specific raised geometry.
-    -- The generic sphere/colors made the Master Ball read flat compared with
-    -- the Pokeball. Add raised crown lobes and a chunky M badge directly to
-    -- the lid mesh so they rotate/open with the shell.
+    -- MASTER1: paint the Master markings onto the existing faceted lid.
+    -- Clip each marking against the dome triangles and interpolate their
+    -- surface positions. A tiny radial offset avoids depth flicker without
+    -- raised boxes or floating spherical decals. Built once with the lid.
     if ball == "MASTER_BALL" then
-      local function boxPatch(cx, cy, cz, sx, sy, sz, slot)
-        local u, v = uvFor(slot, row)
-        local function P(x,y,z,sh) return {x,y,z,u,v,sh or 1.0} end
-        local x0,x1=cx-sx,cx+sx
-        local y0,y1=cy-sy,cy+sy
-        local z0,z1=cz-sz,cz+sz
-        quad(lv,lm,P(x0,y0,z1),P(x1,y0,z1),P(x1,y1,z1),P(x0,y1,z1))
-        quad(lv,lm,P(x1,y0,z0),P(x0,y0,z0),P(x0,y1,z0),P(x1,y1,z0))
-        quad(lv,lm,P(x0,y0,z0),P(x0,y0,z1),P(x0,y1,z1),P(x0,y1,z0))
-        quad(lv,lm,P(x1,y0,z1),P(x1,y0,z0),P(x1,y1,z0),P(x1,y1,z1))
-        quad(lv,lm,P(x0,y1,z1),P(x1,y1,z1),P(x1,y1,z0),P(x0,y1,z0))
+      local shapes = {}
+      local function shape(points, slot)
+        shapes[#shapes + 1] = { points = points, slot = slot }
+      end
+      for _, cx in ipairs({ -0.53, 0.53 }) do
+        local points = {}
+        for i = 0, 19 do
+          local t = TAU * i / 20
+          points[#points + 1] = { cx + 0.16 * math.cos(t),
+                                  0.55 + 0.17 * math.sin(t) }
+        end
+        shape(points, SLOTS.GLOW)
+      end
+      -- Four counterclockwise convex strokes make a legible white M.
+      shape({{-0.28,0.25},{-0.17,0.25},{-0.17,0.69},{-0.28,0.69}}, SLOTS.FACE)
+      shape({{ 0.17,0.25},{ 0.28,0.25},{ 0.28,0.69},{ 0.17,0.69}}, SLOTS.FACE)
+      shape({{0,0.43},{0,0.57},{-0.17,0.69},{-0.28,0.69}}, SLOTS.FACE)
+      shape({{0,0.43},{0.28,0.69},{0.17,0.69},{0,0.57}}, SLOTS.FACE)
+
+      local function clip(poly, boundary)
+        for i = 1, #boundary do
+          local a, b = boundary[i], boundary[i % #boundary + 1]
+          local function distance(p)
+            return (b[1]-a[1])*(p[2]/R-a[2])
+                 - (b[2]-a[2])*(p[1]/R-a[1])
+          end
+          local out = {}
+          if #poly == 0 then return out end
+          local prev = poly[#poly]
+          local dp = distance(prev)
+          for _, cur in ipairs(poly) do
+            local dc = distance(cur)
+            if (dp >= 0) ~= (dc >= 0) then
+              local t = dp / (dp - dc)
+              local p = {}
+              for k = 1, 6 do p[k] = prev[k] + (cur[k]-prev[k])*t end
+              out[#out + 1] = p
+            end
+            if dc >= 0 then out[#out + 1] = cur end
+            prev, dp = cur, dc
+          end
+          poly = out
+        end
+        return poly
       end
 
-      -- Pink crown/ear lobes, raised above the purple dome.
-      boxPatch(-R*0.52, R*0.58, R*0.64, R*0.20, R*0.18, R*0.10, SLOTS.GLOW)
-      boxPatch( R*0.52, R*0.58, R*0.64, R*0.20, R*0.18, R*0.10, SLOTS.GLOW)
-
-      -- Chunky white "M": two uprights plus the center strokes.
-      boxPatch(-R*0.26, R*0.43, R*0.88, R*0.075, R*0.23, R*0.055, SLOTS.FACE)
-      boxPatch( R*0.26, R*0.43, R*0.88, R*0.075, R*0.23, R*0.055, SLOTS.FACE)
-      boxPatch(-R*0.10, R*0.48, R*0.91, R*0.075, R*0.16, R*0.055, SLOTS.FACE)
-      boxPatch( R*0.10, R*0.48, R*0.91, R*0.075, R*0.16, R*0.055, SLOTS.FACE)
+      -- Only the coloured dome participates (exclude belt and underside).
+      local domeFirst = LON * 4 + 1
+      local domeLast = domeFirst + LAT * LON * 4 - 1
+      for first = domeFirst, domeLast, 4 do
+        for _, corners in ipairs({{0,1,2},{0,2,3}}) do
+          local a,b,c = lv[first+corners[1]],lv[first+corners[2]],lv[first+corners[3]]
+          if a[3]+b[3]+c[3] > 0 then
+            for _, marking in ipairs(shapes) do
+              local poly = clip({a,b,c}, marking.points)
+              local u,v = uvFor(marking.slot,row)
+              local function painted(p)
+                return {p[1]*1.003,p[2]*1.003,p[3]*1.003,u,v,p[6]}
+              end
+              for i = 2, #poly-1 do
+                local p,q,r = painted(poly[1]),painted(poly[i]),painted(poly[i+1])
+                quad(lv,lm,p,q,r,p)
+              end
+            end
+          end
+        end
+      end
     end
 
     local base = Voxel3D.newMesh(bv, bm)
@@ -315,61 +376,34 @@ local function meshesFor(ball)
                    { 0.5, 1, 0, u, v, 1 }, { -0.5, 1, 0, u, v, 1 })
       return Voxel3D.newMesh(cv, cm)
     end
-    -- TEST34: real low-poly smoke puff mesh.
-    -- Six quads make a tiny beveled-looking cube; clusters of these expanding
-    -- and drifting read as chunky 3D smoke without touching love.graphics.
+    -- Rounded smoke: shaded latitude rings, shared by all puff instances.
     local function puffMesh()
       local pv, pm = {}, {}
       local u, v = uvFor(SLOTS.FACE, row)
-      local function P(x,y,z,sh) return {x,y,z,u,v,sh or 0.92} end
-      local s = 0.5
-      -- front/back
-      quad(pv,pm,P(-s,-s, s),P( s,-s, s),P( s, s, s),P(-s, s, s))
-      quad(pv,pm,P( s,-s,-s),P(-s,-s,-s),P(-s, s,-s),P( s, s,-s))
-      -- left/right
-      quad(pv,pm,P(-s,-s,-s),P(-s,-s, s),P(-s, s, s),P(-s, s,-s))
-      quad(pv,pm,P( s,-s, s),P( s,-s,-s),P( s, s,-s),P( s, s, s))
-      -- top/bottom
-      quad(pv,pm,P(-s, s, s),P( s, s, s),P( s, s,-s),P(-s, s,-s))
-      quad(pv,pm,P(-s,-s,-s),P( s,-s,-s),P( s,-s, s),P(-s,-s, s))
-      return Voxel3D.newMesh(pv, pm)
-    end
-
-    -- TEST38: actual shell reflection patch. This is geometry sitting
-    -- slightly above the sphere and using the bright FACE material, so it is
-    -- visibly white regardless of additive-glow intensity.
-    local function shinePatch()
-      local sv, sm = {}, {}
-      local u, v = uvFor(SLOTS.FACE, row)
-      local rr = R * 1.025
-
-      -- Small curved patch on the upper/front-left hemisphere.
-      local phi0, phi1 = 0.28, 0.82
-      local th0, th1 = -0.72, -0.04
-      local rows, cols = 3, 4
-
-      local function at(phi, th)
-        local nx = math.cos(phi) * math.sin(th)
-        local ny = math.sin(phi)
-        local nz = math.cos(phi) * math.cos(th)
-        return { nx*rr, ny*rr, nz*rr, u, v, 1.0 }
+      local function at(phi, theta)
+        local x = math.cos(phi)*math.sin(theta)
+        local y = math.sin(phi)
+        local z = math.cos(phi)*math.cos(theta)
+        return {x*0.5,y*0.5,z*0.5,u,v,shadeFor(x,y,z)}
       end
-
-      for iy = 0, rows-1 do
-        local pa = phi0 + (phi1-phi0)*(iy/rows)
-        local pb_ = phi0 + (phi1-phi0)*((iy+1)/rows)
-        for ix = 0, cols-1 do
-          local ta = th0 + (th1-th0)*(ix/cols)
-          local tb = th0 + (th1-th0)*((ix+1)/cols)
-          quad(sv, sm, at(pa,ta), at(pa,tb), at(pb_,tb), at(pb_,ta))
+      for iy=0,3 do
+        local a=-math.pi/2+math.pi*iy/4
+        local b=-math.pi/2+math.pi*(iy+1)/4
+        for ix=0,7 do
+          local c=TAU*ix/8
+          local d=TAU*(ix+1)/8
+          quad(pv,pm,at(a,c),at(a,d),at(b,d),at(b,c))
         end
       end
-      return Voxel3D.newMesh(sv, sm)
+      return Voxel3D.newMesh(pv,pm)
     end
 
-    return { base = base, lid = lid,
-             glow = card(SLOTS.GLOW), star = card(SLOTS.STAR),
-             puff = puffMesh(), shine = shinePatch() }
+    local fv, fm = {}, {}
+    button(fv, fm, row, true)
+    return { base = base, lid = lid, face = Voxel3D.newMesh(fv, fm),
+             buttonRing = buttonRingMesh(row),
+             glow = card(SLOTS.GLOW),
+             puff = puffMesh() }
   end)
   meshes[row] = (ok and built) or false
   return meshes[row] or nil
@@ -406,7 +440,6 @@ function Pokeball.new(ball)
     wobbleT = nil, wobbleDir = 1,
     pulse = nil,                -- the caught click's squash
     glow = 0,
-    stars = nil,                -- caught celebration, or nil
     visible = true,
   }, Pokeball)
 end
@@ -414,31 +447,35 @@ end
 -- ------- the verbs the capture flow speaks
 
 function Pokeball:open()
+  if self.emberAudio then
+    local a=V.require("EmberLegacyAudio");a.capture("hit");a.capture("open")
+  end
+  self.buttonFlashT = nil
+  self.capturePulseT = 0
   -- TEST62: brief visual intake hold; mechanics remain authoritative.
   self.intakeHold = 0.34
-  -- TEST60: contact burst starts exactly with the proven ball-open event.
-  local mult = 1
-  if self.ball == "GREAT_BALL" then mult = 1.25 end
-  if self.ball == "ULTRA_BALL" then mult = 1.55 end
-  if self.ball == "MASTER_BALL" then mult = 2.05 end
-  self.impactFx = { t = 0, life = 0.72, mult = mult }
+  self.impactFx = nil -- q57 owns contact energy; no legacy shard emitter.
   self.lidTarget, self.lidRate = 1, LID_RATE
   self.glow = 1
 end
 
-function Pokeball:close()
-  self.lidTarget, self.lidRate = 0, LID_RATE
+function Pokeball:close(rate)
+  self.lidTarget, self.lidRate = 0, rate or LID_RATE
 end
 
 -- one rock on the ground; dir alternates shakes. Returns how long it takes,
 -- so the caller can sequence the pauses between shakes.
 function Pokeball:rock(dir)
+  if self.emberAudio then
+    self.emberShake=(self.emberShake or 0)+1
+    V.require("EmberLegacyAudio").capture("shake",self.emberShake)
+  end
+  self.capturePulseT = self.capturePulseT or 0
+  self.buttonFlashT = 0
   self.wobbleT = 0
   self.wobbleDir = dir or 1
   return WOBBLE_T
 end
-
--- the caught click: squash pulse, a soft flash, and the stars
 
 -- TEST29: 3D failed-capture breakout burst.
 -- This is visual-only and is triggered by the already-established escape/open event.
@@ -447,11 +484,11 @@ function Pokeball:breakoutBurst(countOverride)
   self.glow = math.max(self.glow or 0, 0.88)
 
   local puffs = {}
-  local count = countOverride or 96 -- TEST97: caller may reuse proven puff renderer at lower density
+  local count = countOverride or 48 -- Rounded puffs need fewer overlapping instances.
   for i = 1, count do
     local th = TAU * (i - 1) / count + ((i % 3) * 0.11)
     puffs[i] = {
-      t = -0.012 * (i - 1),
+      t = 0, -- All puffs exist on the reveal frame, not a delayed stream.
       life = 1.05 + (i % 5) * 0.10,
       th = th,
       speed = 4.2 + (i % 8) * 0.55,
@@ -464,26 +501,25 @@ function Pokeball:breakoutBurst(countOverride)
 end
 
 function Pokeball:catchClick()
-  local starMult = PokeballSettings.starMult()
-  -- TEST47: tiered epic captures.
-  -- Standard/Great = 1x, Ultra = 2x, Master = 4x.
-  local mult = 1
-  if self.ball == "ULTRA_BALL" then mult = 2 end
-  if self.ball == "MASTER_BALL" then mult = 4 end
-
-  self.catchFx = {
-    t = 0,
-    life = 2.85 + 0.28 * (mult - 1),
-    count = math.floor(42 * mult * starMult + 0.5),
-    rings = math.max(0, math.floor((4 + mult) * starMult + 0.5)),
-    epicMult = mult,
-    masterEpic = (self.ball == "MASTER_BALL")
-  }
-  self.glow = math.max(self.glow or 0, 1.0 + 0.18 * mult)
+  if self.emberAudio then V.require("EmberLegacyAudio").capture("success") end
+  self.capturePulseT = nil
+  -- Success is a pulse of the solid shell; no camera-facing celebration cards.
+  self.buttonFlashT = nil
+  self.catchFx, self.stars = nil, nil
+  self.pulse = 0
+  self.glow = 0
 end
 
 -- the breakout: the lid blown open and a hard flash
 function Pokeball:burst()
+  if self.emberAudio then V.require("EmberLegacyAudio").capture("breakout") end
+  self.capturePulseT = nil
+  -- Every breakout path owns the same smoke, including timed fallback.
+  if not self.breakoutStarted then
+    self.breakoutStarted = true
+    self:breakoutBurst()
+  end
+  self.buttonFlashT = nil
   self.lidTarget, self.lidRate = 1, BURST_RATE * 1.65
   self.glow = 1
 end
@@ -494,6 +530,11 @@ function Pokeball:busy()
 end
 
 function Pokeball:update(dt)
+  if self.capturePulseT then self.capturePulseT=self.capturePulseT+dt end
+  if self.buttonFlashT then
+    self.buttonFlashT = self.buttonFlashT + dt
+    if self.buttonFlashT >= WOBBLE_T then self.buttonFlashT = nil end
+  end
   if self.intakeHold and self.intakeHold > 0 then
     self.intakeHold = math.max(0, self.intakeHold - dt)
   end
@@ -521,13 +562,6 @@ function Pokeball:update(dt)
   -- TEST43: continuous moving gloss. Independent from gameplay/capture timing.
   self.glossT = (self.glossT or 0) + dt
 
-  -- TEST42: TEST41 created catchFx but never advanced its timer.
-  if self.catchFx then
-    self.catchFx.t = (self.catchFx.t or 0) + dt
-    if self.catchFx.t >= (self.catchFx.life or 2.35) then
-      self.catchFx = nil
-    end
-  end
   if self.breakoutPuffs then
     local live = false
     for _,p in ipairs(self.breakoutPuffs) do
@@ -548,7 +582,10 @@ function Pokeball:update(dt)
     local step = self.lidRate * dt
     if math.abs(d) <= step then
       -- arriving CLOSED from open is the shut click: the squash pulse
-      if self.lid > self.lidTarget then self.pulse = self.pulse or 0 end
+      if self.lid > self.lidTarget then
+        self.pulse = self.pulse or 0
+        if self.emberAudio and self.lidTarget==0 then V.require("EmberLegacyAudio").capture("close") end
+      end
       self.lid = self.lidTarget
     else
       self.lid = self.lid + (d > 0 and step or -step)
@@ -561,15 +598,6 @@ function Pokeball:update(dt)
   if self.pulse then
     self.pulse = self.pulse + dt
     if self.pulse >= PULSE_T then self.pulse = nil end
-  end
-  if self.stars then
-    local live = false
-    for _, s in ipairs(self.stars) do
-      s.t = s.t + dt
-      if s.t < STAR_T then live = true end
-    end
-    if not live then self.stars = nil
-  self.breakoutFx = nil end
   end
   self.glow = math.max(0, self.glow - GLOW_DECAY * dt)
   self.spinAngle = self.spinAngle + self.spin * dt
@@ -646,21 +674,23 @@ end
 -- This deliberately reuses the exact breakoutPuffs mesh/palette/render path
 -- that already works during failed captures.
 function Pokeball:drawSmokeOnly(pull)
-  if not self.breakoutPuffs then return end
+  if not self.breakoutPuffs then return false end
   local m = meshesFor(self.ball)
   local pal = paletteTexture()
   if not (m and m.puff and pal) then return end
 
   Voxel3D.seams(false)
   Voxel3D.glass(false)
+  local smokeScale = math.max(0.85, self.scale)
+  local drawn = false
   for _,p in ipairs(self.breakoutPuffs) do
     if p.t and p.t >= 0 and p.t < p.life then
       local q = p.t / p.life
-      local rr = (R * 0.25 + p.speed * p.t) * self.scale
+      local rr = (R * 0.85 + p.speed * p.t) * smokeScale
       local sx = self.pos[1] + math.sin(p.th) * rr
       local sz = self.pos[3] + math.cos(p.th) * rr
-      local sy = self.pos[2] + (R * 0.15 + p.rise * p.t) * self.scale
-      local sc = p.size * (1.0 + 1.20*q) * (1.0 - 0.58*q) * self.scale
+      local sy = self.pos[2] + (R * (0.25 + 0.7*math.sin(p.th*3)^2) + p.rise * p.t) * smokeScale
+      local sc = p.size * (1.0 + 1.20*q) * ((1.0 - q)^0.65) * smokeScale
       local M = Mat4.mul(
         Mat4.translate(sx, sy, sz),
         Mat4.mul(
@@ -670,8 +700,43 @@ function Pokeball:drawSmokeOnly(pull)
         )
       )
       Voxel3D.draw(m.puff, pal, M, (pull or 0) + 8)
+      drawn = true
     end
   end
+  return drawn
+end
+
+-- Shell-only draw for q57 release: no legacy smoke/trails/beam overlays.
+function Pokeball:drawBreakShell(progress)
+  local m,pal=meshesFor(self.ball),paletteTexture()
+  if not(m and pal)then return false end
+  local function ease(x)x=math.max(0,math.min(1,x));return x*x*x*(x*(x*6-15)+10)end
+  local spread=ease((progress-.03)/.5)
+  local shrink=1-ease((progress-.45)/.4)
+  if shrink<=0 then return true end
+  local base=self:matrix()
+  for _,lower in ipairs({true,false})do
+    local sign=lower and -1 or 1
+    local part=Mat4.mul(base,Mat4.translate(sign*R*1.8*spread,
+      R*(math.sin(spread*math.pi)*.8+.2*spread),-R*.4*spread))
+    part=Mat4.mul(part,Mat4.rotateX(sign*1.1*spread))
+    part=Mat4.mul(part,Mat4.rotateZ(sign*.7*spread))
+    part=Mat4.mul(part,Mat4.scale(shrink,shrink,shrink))
+    Voxel3D.draw(lower and m.base or m.lid,pal,part,0)
+    if lower and m.face then Voxel3D.draw(m.face,pal,part,0)end
+  end
+  return true
+end
+
+function Pokeball:drawShell(pull)
+  local m,pal=meshesFor(self.ball),paletteTexture()
+  if not (m and pal) then return false end
+  local model=self:matrix()
+  Voxel3D.draw(m.base,pal,model,pull or 0)
+  if m.face then Voxel3D.draw(m.face,pal,model,pull or 0) end
+  local lid=lidMatrix(self.lid)
+  Voxel3D.draw(m.lid,pal,lid and Mat4.mul(model,lid) or model,pull or 0)
+  return true
 end
 
 function Pokeball:draw(pull)
@@ -760,200 +825,22 @@ function Pokeball:draw(pull)
     Voxel3D.seams(true)
   end
 
-  -- TEST60 3D IMPACT + SUCTION BURST -------------------------------------
-  -- Safe non-additive geometry: a fast expanding ring impression followed by
-  -- inward-moving star/energy shards. No fullscreen glow or lighting changes.
-  if self.impactFx and m.glow then
-    local it = self.impactFx.t
-    local life = self.impactFx.life or 0.72
-    local q = math.min(1, it/life)
-    local im = self.impactFx.mult or 1
-    Voxel3D.seams(false)
-    Voxel3D.glass(false)
-
-    -- Expanding radial spokes create a readable shock-ring in 3D.
-    local spokes = math.floor(10 + 4*im)
-    if it < 0.34 then
-      local rq = it/0.34
-      for i=1,spokes do
-        local a=TAU*(i-1)/spokes
-        local inner=R*(0.45+2.25*rq)*self.scale
-        local seglen=R*(0.32+0.35*(1-rq))*self.scale
-        local x=self.pos[1]+math.sin(a)*inner
-        local y=self.pos[2]+R*(0.12+0.18*math.sin(a*2))*self.scale
-        local z=self.pos[3]+math.cos(a)*inner*0.68
-        local dx=math.sin(a)*seglen
-        local dy=R*0.04*math.sin(a*3)*self.scale
-        local dz=math.cos(a)*seglen*0.68
-        local len=math.sqrt(dx*dx+dy*dy+dz*dz)
-        if len>0.001 then
-          dx,dy,dz=dx/len,dy/len,dz/len
-          local ux,uy,uz=-dz,0,dx
-          local ul=math.sqrt(ux*ux+uz*uz)
-          if ul<0.001 then ux,uy,uz=1,0,0 else ux,uz=ux/ul,uz/ul end
-          local vx=dy*uz-dz*uy
-          local vy=dz*ux-dx*uz
-          local vz=dx*uy-dy*ux
-          local w=R*(0.10+0.05*im)*(1-rq)*self.scale
-          local M={ux*w,dx*seglen,vx,x, uy*w,dy*seglen,vy,y, uz*w,dz*seglen,vz,z, 0,0,0,1}
-          Voxel3D.draw(m.glow,pal,M,pull-1)
-        end
-      end
-    end
-
-    -- Inward suction shards: begin outside and collapse toward the ball.
-    if m.star and it > 0.10 then
-      local st=(it-0.10)/0.50
-      if st>=0 and st<1 then
-        local count=math.floor(8+6*im)
-        for i=1,count do
-          local a=TAU*(i-1)/count + i*0.31
-          local rr=R*(2.8*(1-st)+0.28)*self.scale
-          local sx=self.pos[1]+math.sin(a)*rr
-          local sz=self.pos[3]+math.cos(a)*rr*0.66
-          local sy=self.pos[2]+R*(0.25+0.85*(1-st)+0.22*math.sin(a*3))*self.scale
-          local sc=R*(0.18+0.08*im)*(1-0.55*st)*self.scale
-          local M=Mat4.mul(Mat4.translate(sx,sy,sz),
-            Mat4.mul(Mat4.rotateY(eyeYaw(sx,sz)),
-              Mat4.mul(Mat4.rotateZ(-a+it*8),Mat4.scale(sc,sc,1))))
-          Voxel3D.draw(m.star,pal,M,pull+3)
-        end
-      end
-    end
-
-    -- Master-only inward spiral accent.
-    if self.ball == "MASTER_BALL" and m.star and it>0.05 and it<0.62 then
-      local st=(it-0.05)/0.57
-      for i=1,16 do
-        local a=i*0.72 + st*7.0
-        local rr=R*(3.3*(1-st)+0.22)*self.scale
-        local sx=self.pos[1]+math.sin(a)*rr
-        local sz=self.pos[3]+math.cos(a)*rr*0.62
-        local sy=self.pos[2]+R*(0.35+0.9*(1-st))*self.scale
-        local sc=R*0.22*(1-0.45*st)*self.scale
-        local M=Mat4.mul(Mat4.translate(sx,sy,sz),
-          Mat4.mul(Mat4.rotateY(eyeYaw(sx,sz)),
-            Mat4.mul(Mat4.rotateZ(a+it*10),Mat4.scale(sc,sc,1))))
-        Voxel3D.draw(m.star,pal,M,pull+5)
-      end
-    end
-
-    Voxel3D.glass(true)
-    Voxel3D.seams(true)
-  end
-
   Voxel3D.seams(false)
   Voxel3D.glass(false)
   local model = self:matrix()
   Voxel3D.draw(m.base, pal, model, pull)
+  if m.face then Voxel3D.draw(m.face,pal,model,pull) end
+  if m.buttonRing and self.capturePulseT then
+    local age=self.buttonFlashT or self.capturePulseT
+    local pulse=math.sin(math.pi*(age % WOBBLE_T)/WOBBLE_T)^2
+    local brightness=.22+.78*pulse
+    Voxel3D.flatten({brightness,.015*brightness,.045*brightness},1)
+    local ok,err=pcall(Voxel3D.draw,m.buttonRing,pal,model,pull)
+    Voxel3D.flatten(nil)
+    if not ok then error(err,0) end
+  end
   local lidM = lidMatrix(self.lid)
   Voxel3D.draw(m.lid, pal, lidM and Mat4.mul(model, lidM) or model, pull)
-
-  -- TEST38: visible hard shell reflection.
-  if m.shine then
-    Voxel3D.draw(m.shine, pal, model, pull + 14)
-  end
-
-  -- TEST43: dynamic moving specular treatment.
-  -- The highlights sweep over the shell as time advances, giving the ball a
-  -- polished/lacquered read even when the camera or ball rotation is subtle.
-  do
-    local gt = self.glossT or 0
-
-    local function gloss(dx, dy, dz, sx, sy, rot, extraPull)
-      local hx = self.pos[1] + dx * self.scale
-      local hy = self.pos[2] + dy * self.scale
-      local hz = self.pos[3] + dz * self.scale
-      local H = Mat4.mul(
-        Mat4.translate(hx, hy, hz),
-        Mat4.mul(
-          Mat4.rotateY(eyeYaw(hx, hz)),
-          Mat4.mul(
-            Mat4.rotateZ(rot or 0),
-            Mat4.scale(sx * self.scale, sy * self.scale, 1)
-          )
-        )
-      )
-      Voxel3D.draw(m.glow, pal, H, pull + extraPull)
-    end
-
-    -- Slow broad sweep across the upper/front shell.
-    local sweep = math.sin(gt * 2.15)
-    local sweep2 = math.cos(gt * 1.65 + 0.8)
-
-    Voxel3D.blend("add")
-
-    gloss(
-      R * (-0.36 + 0.30 * sweep),
-      R * ( 0.53 + 0.08 * sweep2),
-      R * 0.82,
-      R * 0.62, R * 0.30,
-      -0.30 + sweep * 0.20,
-      16
-    )
-
-    -- Tighter secondary reflection moving opposite the broad streak.
-    gloss(
-      R * (0.18 - 0.18 * sweep),
-      R * (0.32 + 0.10 * sweep),
-      R * 0.91,
-      R * 0.31, R * 0.16,
-      0.22 - sweep * 0.18,
-      17
-    )
-
-    -- Small hot spot: quicker motion gives the impression of a hard,
-    -- polished surface catching stadium light.
-    local hot = math.sin(gt * 3.4 + 1.1)
-    gloss(
-      R * (-0.18 + 0.16 * hot),
-      R * ( 0.70 + 0.05 * math.cos(gt * 3.4)),
-      R * 0.89,
-      R * 0.16, R * 0.10,
-      gt * 0.35,
-      18
-    )
-
-    Voxel3D.blend(nil)
-  end
-
-  -- the additive dressing: the open-mouth glow and the caught stars.
-  -- Depth writes are off under "add" (Voxel3D.blend), so these can never
-  -- punch holes for later draws.
-  local anythingAdd = (self.glow > 0.05 and self.lid > 0.1) or self.stars
-  if anythingAdd then
-    Voxel3D.blend("add")
-    if self.glow > 0.05 and self.lid > 0.1 then
-      -- a pulsing octahedron of light standing in the mouth: two crossed
-      -- cards read from every seat in the house
-      local gx, gy, gz = self:mouth()
-      local s = R * (1.1 + 0.25 * self.glow) * self.scale
-      for i = 0, 1 do
-        local card = Mat4.mul(Mat4.translate(gx, gy, gz),
-                     Mat4.mul(Mat4.rotateY(eyeYaw(gx, gz) + i * math.pi / 2),
-                              Mat4.scale(s, s, 1)))
-        Voxel3D.draw(m.glow, pal, card, pull)
-      end
-    end
-    if self.stars then
-      for _, s in ipairs(self.stars) do
-        if s.t > 0 and s.t < STAR_T then
-          local t = s.t / STAR_T
-          local rr = (R + 4.5 * t) * self.scale
-          local sx = self.pos[1] + math.sin(s.th) * rr
-          local sz = self.pos[3] + math.cos(s.th) * rr
-          local sy = self.pos[2] + (R + 7 * t - 5 * t * t) * self.scale
-          local sc = 1.1 * (1 - t)
-          local card = Mat4.mul(Mat4.translate(sx, sy, sz),
-                       Mat4.mul(Mat4.rotateY(eyeYaw(sx, sz)),
-                       Mat4.mul(Mat4.rotateZ(TAU * t * 0.5),
-                                Mat4.scale(sc, sc, 1))))
-          Voxel3D.draw(m.star, pal, card, pull)
-        end
-      end
-    end
-    Voxel3D.blend(nil)
-  end
 
   -- TEST34 TRUE VOXEL SMOKE ---------------------------------------------
   -- Opaque low-poly puffs, drawn through Voxel3D itself. They expand, rise,
@@ -981,368 +868,6 @@ function Pokeball:draw(pull)
         )
         Voxel3D.draw(m.puff, pal, M, pull + 8)
       end
-    end
-  end
-
-  -- TEST47: UNIVERSAL TIERED EPIC CAPTURE -------------------------------
-  -- Every ball gets a larger celebration. Ultra gets 2x density; Master 4x.
-  if PokeballSettings.starMult() > 0 and self.catchFx and m.star then
-    local et = self.catchFx.t or 0
-    local em = self.catchFx.epicMult or 1
-    local elife = self.catchFx.life or 2.85
-
-    if et >= 0 and et < elife then
-      Voxel3D.blend("add")
-
-      -- Giant opening shock-stars.
-      local heroCount = 10 * em
-      for i = 1, heroCount do
-        local delay = 0.02 + (i % (5*em)) * 0.012
-        local rt = et - delay
-        if rt >= 0 and rt < 1.30 then
-          local q = rt / 1.30
-          local a = TAU * (i-1)/heroCount + (i%3)*0.11
-          local rr = R * (0.55 + (3.9 + 0.35*em)*q) * self.scale
-          local sx = self.pos[1] + math.sin(a)*rr
-          local sz = self.pos[3] + math.cos(a)*rr*0.76
-          local sy = self.pos[2] + (R*0.52 + math.sin(a*2.3)*R*0.48 + q*R*(1.45+0.18*em))*self.scale
-          local sc = R*(0.88 + 0.09*em - 0.30*q)*self.scale
-          local M = Mat4.mul(
-            Mat4.translate(sx,sy,sz),
-            Mat4.mul(Mat4.rotateY(eyeYaw(sx,sz)),
-              Mat4.mul(Mat4.rotateZ(a+rt*(3.4+0.25*em)),
-                Mat4.scale(sc,sc,1)))
-          )
-          Voxel3D.draw(m.star,pal,M,pull+31+(i%9))
-        end
-      end
-
-      -- Dense expanding sparkle storm.
-      local stormCount = 36 * em
-      for i = 1, stormCount do
-        local delay = 0.24 + (i % (8*em)) * 0.010
-        local rt = et - delay
-        if rt >= 0 and rt < 2.05 then
-          local q = rt/2.05
-          local a = i*2.399963 + (i%7)*0.13 + rt*(0.55 + 0.10*em)
-          local rr = R*(0.70 + (i%9)*0.16 + q*(2.20+0.22*em))*self.scale
-          local sx = self.pos[1] + math.sin(a)*rr
-          local sz = self.pos[3] + math.cos(a)*rr*0.70
-          local sy = self.pos[2] + (R*(0.20+(i%8)*0.14) + q*R*(1.30+(i%5)*0.16))*self.scale
-          local tw = 0.72 + 0.28*math.sin(rt*(11+em)+i)
-          local sc = R*(0.26+(i%4)*0.07)*(1-0.38*q)*tw*self.scale
-          local M = Mat4.mul(
-            Mat4.translate(sx,sy,sz),
-            Mat4.mul(Mat4.rotateY(eyeYaw(sx,sz)),
-              Mat4.mul(Mat4.rotateZ(-a+rt*(4.2+0.25*em)),
-                Mat4.scale(sc,sc,1)))
-          )
-          Voxel3D.draw(m.star,pal,M,pull+25+(i%7))
-        end
-      end
-
-      -- Lingering upper crown, denser by tier.
-      local crownCount = 12 * em
-      if et > 0.85 then
-        local rt = et-0.85
-        if rt < 1.85 then
-          local fade = math.max(0,1-rt/1.85)
-          for i = 1,crownCount do
-            local a = TAU*(i-1)/crownCount - rt*(1.05+0.12*em)
-            local rr = R*(1.65+0.18*em+0.22*math.sin(i*1.7))*self.scale
-            local sx = self.pos[1]+math.sin(a)*rr
-            local sz = self.pos[3]+math.cos(a)*rr*0.68
-            local sy = self.pos[2]+R*(2.05+0.28*math.sin(a*3))*self.scale
-            local sc = R*(0.34+0.035*em)*fade*self.scale
-            local M = Mat4.mul(
-              Mat4.translate(sx,sy,sz),
-              Mat4.mul(Mat4.rotateY(eyeYaw(sx,sz)),
-                Mat4.mul(Mat4.rotateZ(rt*3.1+i),
-                  Mat4.scale(sc,sc,1)))
-            )
-            Voxel3D.draw(m.star,pal,M,pull+30)
-          end
-        end
-      end
-
-      Voxel3D.blend(nil)
-    end
-  end
-
-  -- TEST48: MASTER BALL ZING ---------------------------------------------
-  -- Fast, aerobic, flashy motion layered on top of TEST47's 4x spectacle.
-  if PokeballSettings.starMult() > 0 and self.catchFx and self.catchFx.masterEpic and m.star then
-    local zt = self.catchFx.t or 0
-    if zt >= 0 and zt < 3.35 then
-      Voxel3D.blend("add")
-
-      -- Rapid strobe pulses from the ball: quick visual "hits", not a slow glow.
-      if zt < 1.35 and m.glow then
-        local beat = math.max(0, math.sin(zt * 30.0))
-        local gs = R * (1.55 + beat * 2.25) * self.scale
-        local gx,gy,gz=self.pos[1],self.pos[2]+R*0.16*self.scale,self.pos[3]
-        local G=Mat4.mul(Mat4.translate(gx,gy,gz),
-          Mat4.mul(Mat4.rotateY(eyeYaw(gx,gz)),Mat4.scale(gs,gs,1)))
-        Voxel3D.draw(m.glow,pal,G,pull+58)
-      end
-
-      -- Two counter-rotating "aerobic" star ribbons whipping around the ball.
-      for arm=1,2 do
-        local dir=(arm==1) and 1 or -1
-        for i=1,28 do
-          local delay=(i-1)*0.018
-          local rt=zt-delay
-          if rt>=0 and rt<1.75 then
-            local q=rt/1.75
-            local a=dir*(rt*7.4+i*0.38)+arm*1.4
-            local rr=R*(0.72+q*3.55+(i%4)*0.10)*self.scale
-            local sx=self.pos[1]+math.sin(a)*rr
-            local sz=self.pos[3]+math.cos(a)*rr*0.70
-            local sy=self.pos[2]+R*(0.30+q*2.65+0.42*math.sin(a*2))*self.scale
-            local sc=R*(0.42+0.10*math.sin(rt*13+i))*self.scale
-            local M=Mat4.mul(Mat4.translate(sx,sy,sz),
-              Mat4.mul(Mat4.rotateY(eyeYaw(sx,sz)),
-                Mat4.mul(Mat4.rotateZ(-a+dir*rt*8.0),Mat4.scale(sc,sc,1))))
-            Voxel3D.draw(m.star,pal,M,pull+44+(i%8))
-          end
-        end
-      end
-
-      -- Four explosive star "firework" beats.
-      local beats={0.12,0.46,0.82,1.18}
-      for b,bt in ipairs(beats) do
-        local rt=zt-bt
-        if rt>=0 and rt<0.72 then
-          local q=rt/0.72
-          for i=1,16 do
-            local a=TAU*(i-1)/16+b*0.43
-            local rr=R*(0.35+4.65*q)*self.scale
-            local sx=self.pos[1]+math.sin(a)*rr
-            local sz=self.pos[3]+math.cos(a)*rr*0.62
-            local sy=self.pos[2]+R*(0.45+math.sin(a*3+b)*0.65+q*1.55)*self.scale
-            local sc=R*(0.72-0.30*q)*self.scale
-            local M=Mat4.mul(Mat4.translate(sx,sy,sz),
-              Mat4.mul(Mat4.rotateY(eyeYaw(sx,sz)),
-                Mat4.mul(Mat4.rotateZ(a+rt*7.0),Mat4.scale(sc,sc,1))))
-            Voxel3D.draw(m.star,pal,M,pull+50+b)
-          end
-        end
-      end
-
-      -- Late glitter fountain keeps energy alive after the big blast.
-      if zt>1.10 then
-        local rt=zt-1.10
-        for i=1,44 do
-          local phase=(i%11)*0.055
-          local tt=rt-phase
-          if tt>=0 and tt<1.85 then
-            local q=tt/1.85
-            local a=i*2.399963+tt*1.8
-            local rr=R*(0.35+(i%8)*0.19+q*1.35)*self.scale
-            local sx=self.pos[1]+math.sin(a)*rr
-            local sz=self.pos[3]+math.cos(a)*rr*0.58
-            local sy=self.pos[2]+R*(0.20+(i%5)*0.13+q*3.10)*self.scale
-            local tw=0.58+0.42*math.max(0,math.sin(tt*17+i))
-            local sc=R*(0.17+(i%3)*0.05)*tw*self.scale
-            local M=Mat4.mul(Mat4.translate(sx,sy,sz),
-              Mat4.mul(Mat4.rotateY(eyeYaw(sx,sz)),
-                Mat4.mul(Mat4.rotateZ(tt*8+i),Mat4.scale(sc,sc,1))))
-            Voxel3D.draw(m.star,pal,M,pull+41)
-          end
-        end
-      end
-
-      Voxel3D.blend(nil)
-    end
-  end
-
-  -- TEST46: MASTER BALL EPIC CAPTURE ------------------------------------
-  -- Runs in addition to TEST44's normal victory burst, only for Master Ball.
-  if PokeballSettings.starMult() > 0 and self.catchFx and self.catchFx.masterEpic and m.star then
-    local mt = self.catchFx.t or 0
-    local mlife = self.catchFx.life or 3.35
-    if mt >= 0 and mt < mlife then
-      Voxel3D.blend("add")
-
-      -- Massive opening crown burst: twelve oversized stars.
-      for i = 1, 12 do
-        local delay = 0.03 + (i % 4) * 0.025
-        local rt = mt - delay
-        if rt >= 0 and rt < 1.35 then
-          local q = rt / 1.35
-          local a = TAU * (i-1)/12 + 0.17
-          local rr = R * (0.55 + 5.25*q) * self.scale
-          local sx = self.pos[1] + math.sin(a) * rr
-          local sz = self.pos[3] + math.cos(a) * rr * 0.78
-          local sy = self.pos[2] + (R*0.62 + math.sin(a*2.0)*R*0.55 + q*R*2.25) * self.scale
-          local sc = R * (1.28 - 0.46*q) * self.scale
-          local M = Mat4.mul(
-            Mat4.translate(sx, sy, sz),
-            Mat4.mul(Mat4.rotateY(eyeYaw(sx, sz)),
-              Mat4.mul(Mat4.rotateZ(a + rt*4.4),
-                Mat4.scale(sc, sc, 1)))
-          )
-          Voxel3D.draw(m.star, pal, M, pull + 42 + i)
-        end
-      end
-
-      -- Dense double spiral: 64 stars wrapping around and rising above ball.
-      for i = 1, 48 do
-        local delay = 0.20 + (i % 8) * 0.022
-        local rt = mt - delay
-        if rt >= 0 and rt < 2.15 then
-          local q = rt / 2.15
-          local arm = (i % 2 == 0) and 1 or -1
-          local a = i * 0.73 + arm * rt * 3.25
-          local rr = R * (1.00 + (i%9)*0.15 + q*2.55) * self.scale
-          local sx = self.pos[1] + math.sin(a) * rr
-          local sz = self.pos[3] + math.cos(a) * rr * 0.72
-          local sy = self.pos[2] + (R*(0.22 + (i%7)*0.16) + q*R*2.20) * self.scale
-          local tw = 0.78 + 0.22*math.sin(rt*14 + i)
-          local sc = R * (0.32 + (i%4)*0.085) * (1.0 - 0.32*q) * tw * self.scale
-          local M = Mat4.mul(
-            Mat4.translate(sx, sy, sz),
-            Mat4.mul(Mat4.rotateY(eyeYaw(sx, sz)),
-              Mat4.mul(Mat4.rotateZ(-a + rt*5.2),
-                Mat4.scale(sc, sc, 1)))
-          )
-          Voxel3D.draw(m.star, pal, M, pull + 34 + (i%6))
-        end
-      end
-
-      -- Final celestial crown above the caught Master Ball.
-      if mt > 1.15 and mt < 3.15 then
-        local rt = mt - 1.15
-        local fade = math.max(0, 1 - math.max(0, rt-1.25)/0.75)
-        for i = 1, 18 do
-          local a = TAU*(i-1)/18 - rt*1.45
-          local rr = R*(2.0 + 0.30*math.sin(i*2.1 + rt*3)) * self.scale
-          local sx = self.pos[1] + math.sin(a)*rr
-          local sz = self.pos[3] + math.cos(a)*rr*0.70
-          local sy = self.pos[2] + R*(2.55 + 0.35*math.sin(a*3))*self.scale
-          local sc = R*0.46*fade*self.scale
-          local M = Mat4.mul(
-            Mat4.translate(sx, sy, sz),
-            Mat4.mul(Mat4.rotateY(eyeYaw(sx, sz)),
-              Mat4.mul(Mat4.rotateZ(rt*3.8+i),
-                Mat4.scale(sc, sc, 1)))
-          )
-          Voxel3D.draw(m.star, pal, M, pull + 38)
-        end
-      end
-
-      -- Repeated Master Ball pulse so the ball itself remains the centerpiece.
-      if mt < 1.55 and m.glow then
-        local pulse = 0.65 + 0.35*math.sin(mt*18)
-        local gs = R*(2.15 + 0.75*pulse)*self.scale
-        local gx,gy,gz = self.pos[1],self.pos[2]+R*0.12*self.scale,self.pos[3]
-        local G = Mat4.mul(
-          Mat4.translate(gx,gy,gz),
-          Mat4.mul(Mat4.rotateY(eyeYaw(gx,gz)),
-            Mat4.scale(gs,gs,1))
-        )
-        Voxel3D.draw(m.glow,pal,G,pull+48)
-      end
-
-      Voxel3D.blend(nil)
-    end
-  end
-
-  -- TEST44: VICTORY BURST ---------------------------------------------
-  -- Intentionally asymmetric choreography:
-  -- flash -> giant hero stars -> medium stars -> lingering sparkle field.
-  if PokeballSettings.starMult() > 0 and self.catchFx and m.star then
-    local ct = self.catchFx.t or 0
-    local life = self.catchFx.life or 2.55
-
-    if ct >= 0 and ct < life then
-      Voxel3D.blend("add")
-
-      -- 1) Capture-confirmation flash/pulse from the ball itself.
-      if ct < 0.42 then
-        local q = ct / 0.42
-        local pulse = math.sin(math.min(1, q) * math.pi)
-        local ps = R * (1.10 + 2.30*q) * self.scale
-        local px, py, pz = self.pos[1], self.pos[2] + R*0.20*self.scale, self.pos[3]
-        local P = Mat4.mul(
-          Mat4.translate(px, py, pz),
-          Mat4.mul(Mat4.rotateY(eyeYaw(px, pz)),
-                   Mat4.scale(ps*pulse, ps*pulse, 1))
-        )
-        Voxel3D.draw(m.glow, pal, P, pull + 34)
-      end
-
-      -- 2) Eight HUGE hero stars punching outward in uneven directions.
-      local heroDirs = {
-        {-1.00, 0.48}, {-0.62, 0.92}, {-0.18, 1.10}, {0.42, 0.94},
-        { 0.98, 0.56}, { 0.78, 0.18}, {-0.78, 0.12}, {0.16, 0.46}
-      }
-      for i,d in ipairs(heroDirs) do
-        local delay = 0.10 + (i-1)*0.035
-        local rt = ct - delay
-        if rt >= 0 and rt < 1.15 then
-          local q = rt / 1.15
-          local rr = R * (0.75 + 4.15*q) * self.scale
-          local sx = self.pos[1] + d[1] * rr
-          local sy = self.pos[2] + (R*0.55 + d[2]*rr + q*R*0.65) * self.scale
-          local sz = self.pos[3] + math.sin(i*1.71) * R * (0.50 + 0.80*q) * self.scale
-          local sc = R * (1.05 - 0.38*q) * self.scale
-          local S = Mat4.mul(
-            Mat4.translate(sx, sy, sz),
-            Mat4.mul(Mat4.rotateY(eyeYaw(sx, sz)),
-                     Mat4.mul(Mat4.rotateZ(i*0.67 + rt*3.5),
-                              Mat4.scale(sc, sc, 1)))
-          )
-          Voxel3D.draw(m.star, pal, S, pull + 28 + i)
-        end
-      end
-
-      -- 3) Medium secondary burst, deliberately offset so it doesn't form a ring.
-      for i = 1, 24 do
-        local delay = 0.32 + (i % 6) * 0.035
-        local rt = ct - delay
-        if rt >= 0 and rt < 1.35 then
-          local q = rt / 1.35
-          local a = i * 2.399963 + (i % 4)*0.21
-          local rr = R * (0.60 + q*(2.10 + (i%5)*0.22)) * self.scale
-          local sx = self.pos[1] + math.sin(a) * rr
-          local sz = self.pos[3] + math.cos(a) * rr * 0.72
-          local sy = self.pos[2] + (R*(0.30 + (i%5)*0.18) + q*R*(0.55 + (i%4)*0.22)) * self.scale
-          local sc = R * (0.46 + (i%3)*0.10) * (1.0 - 0.42*q) * self.scale
-          local S = Mat4.mul(
-            Mat4.translate(sx, sy, sz),
-            Mat4.mul(Mat4.rotateY(eyeYaw(sx, sz)),
-                     Mat4.mul(Mat4.rotateZ(-a + rt*4.2),
-                              Mat4.scale(sc, sc, 1)))
-          )
-          Voxel3D.draw(m.star, pal, S, pull + 22 + (i%4))
-        end
-      end
-
-      -- 4) Lingering little sparkles drifting upward after the main impact.
-      for i = 1, 34 do
-        local delay = 0.72 + (i % 9) * 0.055
-        local rt = ct - delay
-        if rt >= 0 and rt < 1.65 then
-          local q = rt / 1.65
-          local a = i * 1.618034 * 2.0
-          local rr = R * (0.55 + (i%7)*0.30 + q*0.65) * self.scale
-          local sx = self.pos[1] + math.sin(a) * rr
-          local sz = self.pos[3] + math.cos(a) * rr * 0.62
-          local sy = self.pos[2] + (R*(0.20 + (i%6)*0.18) + q*R*1.45) * self.scale
-          local twinkle = 0.72 + 0.28*math.sin(rt*12 + i)
-          local sc = R * (0.18 + (i%3)*0.055) * (1.0 - 0.48*q) * twinkle * self.scale
-          local S = Mat4.mul(
-            Mat4.translate(sx, sy, sz),
-            Mat4.mul(Mat4.rotateY(eyeYaw(sx, sz)),
-                     Mat4.mul(Mat4.rotateZ(rt*5.0 + i),
-                              Mat4.scale(sc, sc, 1)))
-          )
-          Voxel3D.draw(m.star, pal, S, pull + 20)
-        end
-      end
-
-      Voxel3D.blend(nil)
     end
   end
 
@@ -1605,20 +1130,7 @@ function Pokeball:drawBeam(tx, ty, tz, width, strength, pull)
     end
 
     -- MASTER BALL: extra compact vortex at the mouth of the ball.
-    if self.ball=="MASTER_BALL" and m.star then
-      for i=1,12 do
-        local a=TAU*(i-1)/12-time*8.5
-        local rr=R*(0.32+0.20*math.sin(time*5+i))*self.scale
-        local hx=bx+math.cos(a)*rr
-        local hy=by+R*0.10*self.scale+math.sin(a)*rr
-        local hz=bz+math.sin(a)*rr*0.45
-        local sc=R*0.12*self.scale
-        local M=Mat4.mul(Mat4.translate(hx,hy,hz),
-          Mat4.mul(Mat4.rotateY(eyeYaw(hx,hz)),
-            Mat4.mul(Mat4.rotateZ(a+time*9),Mat4.scale(sc,sc,1))))
-        Voxel3D.draw(m.star,pal,M,pull+7)
-      end
-    end
+
   end
   Voxel3D.blend(nil)
   Voxel3D.glass(true)
@@ -1638,6 +1150,7 @@ function Pokeball:cast(shadowMap)
   if not (m and pal) then return end
   local model = self:matrix()
   shadowMap.draw(m.base, pal, model)
+  if m.face then shadowMap.draw(m.face, pal, model) end
   local lidM = lidMatrix(self.lid)
   shadowMap.draw(m.lid, pal, lidM and Mat4.mul(model, lidM) or model)
 end

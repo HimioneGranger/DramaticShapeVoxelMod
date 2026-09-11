@@ -8,6 +8,7 @@ local Mat4 = V.require("Mat4")
 local BattleArt = V.require("BattleArt")
 
 local StadiumModels = {}
+local FlyMotion = V.require("FlyMotion")
 
 local providerHandle, providerExports, models
 local actors = { player = {}, enemy = {} }
@@ -233,6 +234,7 @@ local function updatePresentation(battle, side, actor)
 end
 
 function StadiumModels.update(battle, dt)
+  FlyMotion.update(battle, dt)
   if not StadiumModels.sync(battle) then return false end
 
   for _, side in ipairs({ "player", "enemy" }) do
@@ -299,11 +301,31 @@ local function modelMatrix(arena, groundY, battle, side, actor, metrics)
   local battler = battle and battle[side]
   local grow = battler and safeCall(battle, "growInScale", battler) or 1
   grow = tonumber(grow) or 1
+  local plasma=battle and battle.legendaryQ57 and battle.legendaryQ57[side]
+  if plasma and plasma.subjectDone then plasma=nil end
+  local release = battle and ((side=="enemy" and battle.legendaryBreakoutPose)
+    or (battle.legendaryReleasePose and battle.legendaryReleasePose[side]))
+  if release then grow=release.scale end
+  if plasma then grow=1 end
   local k = worldHeight / metrics.height * math.max(0, math.min(1, grow))
   local floor = tonumber(metrics.floor) or 0
   local hover = math.min(math.max(floor, 0), metrics.height * 0.5)
   local yaw = atan2(target[1] - point[1], target[2] - point[2])
-  local model = Mat4.mul(Mat4.translate(point[1], groundY, point[2]),
+  if plasma then
+    plasma.source={point[1],groundY+worldHeight*0.5,point[2]}
+    plasma.height=worldHeight
+    plasma.width=math.max(4,math.min(64,worldHeight*(tonumber(metrics.width) or metrics.height)/metrics.height))
+    plasma.yaw=yaw;plasma.rx=math.cos(yaw);plasma.rz=-math.sin(yaw)
+    plasma.fx=math.sin(yaw);plasma.fz=math.cos(yaw)
+  end
+  local flight = FlyMotion.pose(battle, side)
+  local fx,fy,fz=point[1],groundY,point[2]
+  if flight then
+    fx=fx+(target[1]-point[1])*flight.advance
+    fz=fz+(target[2]-point[2])*flight.advance
+    fy=fy+flight.height
+  end
+  local model = Mat4.mul(Mat4.translate(fx, fy, fz),
     Mat4.mul(Mat4.rotateY(yaw),
       Mat4.mul(Mat4.scale(k, k, k), Mat4.translate(0, -(floor - hover), 0))))
 
@@ -313,7 +335,7 @@ local function modelMatrix(arena, groundY, battle, side, actor, metrics)
   -- and authoritative battler remain untouched.
   local intake = side == "enemy" and battle
     and battle.dramaticShape3DBallIntake or nil
-  if type(intake) == "table" and intake.active then
+  if not plasma and type(intake) == "table" and intake.active then
     local shrinkK = math.max(0.03, math.min(1, tonumber(intake.scale) or 1))
     local pull = math.max(0, math.min(1, tonumber(intake.pull) or 0))
     local ax, ay, az = point[1], groundY + worldHeight * 0.55, point[2]
@@ -342,12 +364,21 @@ function StadiumModels.placements(arena, groundY, textures, battle)
     local metrics = drawableMetrics(actor, side)
     local captured = side == "enemy" and battle
       and battle.dramaticShape3DBallHide == true
-    if captured then texture = nil end
-    if texture and not texture.trainer and metrics then
+    local flight = FlyMotion.pose(battle, side)
+    if captured then texture = nil; flight=nil end
+    -- Native Fly hides its sprite slot. Keep the 3D owner during ascent and
+    -- descent, without reviving a captured Pokemon or a trainer portrait.
+    if metrics and ((texture and not texture.trainer) or (flight and not captured)) then
       local matrix = modelMatrix(arena, groundY, battle, side, actor, metrics)
       if matrix then
         out[side] = { side = side, actor = actor, instance = actor.instance,
-                      modelMatrix = matrix }
+                      flightHidden = flight and flight.hidden,
+                      modelMatrix = matrix,
+                      plasma=battle and battle.legendaryQ57 and battle.legendaryQ57[side],
+                      release = battle and ((side=="enemy" and battle.legendaryBreakoutPose)
+                        or (battle.legendaryReleasePose and battle.legendaryReleasePose[side])),
+                      intake = side == "enemy" and battle
+                        and battle.dramaticShape3DBallIntake or nil }
       end
     end
   end
@@ -355,9 +386,14 @@ function StadiumModels.placements(arena, groundY, textures, battle)
 end
 
 function StadiumModels.draw(placement, context, pass)
+  if placement and placement.flightHidden then return true end
   if not (placement and placement.instance and context) then return false end
   local actor = placement.actor
   local tint = context.tint or { 1, 1, 1 }
+  local intake = placement.intake
+  local absorbing = type(intake) == "table" and intake.active
+  if placement.plasma and placement.plasma.subjectDone then placement.plasma=nil end
+  local captureAmount = absorbing and (tonumber(intake.colorAmount) or 1) or 0
   local shadow
   if context.shadowMap and context.shadowVP then
     shadow = {
@@ -375,7 +411,11 @@ function StadiumModels.draw(placement, context, pass)
     light = context.light,
     shadow = shadow,
     tint = { tint[1] or 1, tint[2] or 1, tint[3] or 1, tint[4] or 1 },
-    flashAmount = (context.flashing or (actor.flash or 0) > 0) and 0.5 or 0,
+    q57Pose = placement.plasma,
+    flashAmount = placement.plasma and 0 or absorbing and captureAmount
+      or (placement.release and placement.release.amount)
+      or ((context.flashing or (actor.flash or 0) > 0) and 0.5 or 0),
+    flashColor = absorbing and (intake.color or {1,0.08,0.30}) or {1,1,1},
     flipWinding = true,
     disableCulling = true,
     skipHandlers = pass == "additive",
@@ -395,6 +435,7 @@ end
 local FROM_UNIT_Z = { 1,0,0,0, 0,1,0,0, 0,0,2,-1, 0,0,0,1 }
 
 function StadiumModels.drawShadow(placement, lightClipVP)
+  if placement and placement.flightHidden then return true end
   if not (placement and placement.instance and lightClipVP) then return false end
   local called, ok, err = pcall(placement.instance.drawShadow,
     placement.instance, {

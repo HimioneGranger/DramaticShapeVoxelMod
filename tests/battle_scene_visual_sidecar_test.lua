@@ -92,6 +92,7 @@ function Voxel3D.backdrop() end
 function Voxel3D.flatten() end
 function Voxel3D.seams() end
 function Voxel3D.glass() end
+function Voxel3D.battleFoliage() end
 function Voxel3D.dayTint() end
 function Voxel3D.lighting() end
 
@@ -214,6 +215,10 @@ love = {
 
 local namespace = {}
 function namespace.require(name)
+  if name == 'q57/Adapter' then return {prepare = function() end, draw = function() end} end
+  if name == 'q57/Ballistics' then return assert(loadfile('lib/q57/Ballistics.lua'))() end
+  if name == 'SuccessStars' or name == 'EmberLegacyAudio' then return {} end
+  if name == 'GameCorner' or name == 'LegendaryGarden' then return {draw = function() end} end
   if name == 'CommunityVisuals' then return {
     customForest = function() return false end, customTrees = function() return false end,
   } end

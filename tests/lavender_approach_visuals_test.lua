@@ -54,7 +54,8 @@ local Structures = assert(loadfile('lib/Structures.lua'))({
   require = function(name)
     if name == 'BuildBudget' then return { tick = function() end } end
     if name == 'CommunityVisuals' then
-      return { customGrass = function() return grassMode end }
+      return { customGrass = function() return grassMode end,
+        customCityGround = function() return false end }
     end
     if name == 'VoxelVisualObjects' then
       return { id = function() return 'lavender-sign' end }

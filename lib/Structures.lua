@@ -686,6 +686,7 @@ function Structures.buildLegendarySigns(S, map, x0, x1, y0, y1, data)
       S.legendarySignLabels[id] = { label1, label2 }
     end
 
+    local firstSignQuad = #quads + 1
     -- Keep TEST84's approved broad, low footprint and single stout post.
     box(x - 1.20, 0.0, z - 2.25, x + 1.20, 6.0, z - 0.95, true)
     box(x - 1.70, 0.0, z - 2.50, x + 1.70, 0.75, z - 0.70, true)
@@ -751,6 +752,18 @@ function Structures.buildLegendarySigns(S, map, x0, x1, y0, y1, data)
       panel(x + p[1], p[2], x + p[1] + 0.28, p[2] + 0.28,
             front + 0.035, "ink", 0.88)
     end
+    -- The tower-side marker welcomes players arriving from Route 10.
+    -- Rotate the complete sign about its post, including readable glyphs.
+    if mapId == "LAVENDER_TOWN" and node.cx == 9 and node.cy == 3 then
+      for qi = firstSignQuad, #quads do
+        local q = quads[qi]
+        for j = 1, 4 do
+          local p = q[j]
+          q[j] = { 2*x-p[1], p[2], 2*(z-1.60)-p[3] }
+        end
+      end
+    end
+
   end
   activeVisualObjectId = nil
   return true
@@ -866,6 +879,8 @@ function Structures.forMap(map)
   if map.id == "MUSEUM_1F" then V.require("MuseumFossils").build(S,map,pixels(tileset),perRow) end
   V.require("SafariFoliage").build(S,map)
   V.require("SafariStatues").build(S,map)
+  V.require("TowerGarden").prepare(S,map,keyOf)
+  V.require("GameCorner").build(S,map)
   Buildings.build(S, map, pixels(tileset), perRow)
   if tileset.id == "PLATEAU" then
     V.require("FacadeEntrances").build(S, map, pixels(tileset), perRow)
@@ -2574,11 +2589,31 @@ local function bookcasePanes(map, data, perRow, run, i, j)
   return pane, srcU, srcV, W, H
 end
 
+-- MART SHELVES TEST3: lower freestanding goods racks, including repeated goods rows.
+-- Shared back-wall and clerk-display rows must retain their original height.
+local MART_RACK_UPPER = { [64]=true, [65]=true, [67]=true,
+                         [80]=true, [81]=true, [83]=true }
+local MART_RACK_LOWER = { [68]=true, [69]=true, [71]=true,
+                         [84]=true, [85]=true, [87]=true }
+local function martRackScale(map, rank)
+  if not map.tileset or map.tileset.id ~= "MART" then return 1 end
+  local upper, lower = false, false
+  for ty = rank.top, rank.front do
+    local tile = map:tileAt(rank.tx, ty)
+    if MART_RACK_UPPER[tile] then upper = true
+    elseif MART_RACK_LOWER[tile] then lower = true
+    else return 1 end
+  end
+  return lower and 0.625 or 1
+end
+
 local function bookcaseRank(S, map, perRow, run, i, j, k, pane, srcU, srcV,
                             bankW, bankH)
   local r = run[k]
   local tx, northTy, frontTy, capTile = r.tx, r.top, r.front, r.cap
   local quads = S.objectQuads
+  local firstQuad = #quads + 1
+  local rackScale = martRackScale(map, r)
   local atlasW = map.tileset.imageWidth or 128
   local atlasH = map.tileset.imageHeight or 48
   local function uvRect(tile)
@@ -2726,6 +2761,15 @@ local function bookcaseRank(S, map, perRow, run, i, j, k, pane, srcU, srcV,
       uv = { { u0, v0 }, { u1, v0 }, { u1, v1 }, { u0, v1 } },
       shade = BOOK_SHADE.top }
   end
+  -- Scale every face and recessed detail together, anchored to floor y=0.
+  -- X/Z footprint, UVs, tile ownership and gameplay collision stay intact.
+  if rackScale ~= 1 then
+    for qi = firstQuad, #quads do
+      local q = quads[qi]
+      for vi = 1, 4 do q[vi][2] = q[vi][2] * rackScale end
+    end
+  end
+
 end
 
 function Structures.buildBookcases(S, map, x0, x1, y0, y1, data, perRow)
@@ -3244,6 +3288,23 @@ function Structures.buildVolume(S, map, tiles)
     run.h = h - run.rise               -- facade height: what sides build to
     run.topUniform = run.ownUniform or regionUniform
     run.kantoRetaining = kantoRetaining or nil
+    -- WALL1: an adjacent appended building may disqualify the region, but
+    -- a pure repeated rock column still owns its masonry finish. Keep the
+    -- existing height/roof decisions unchanged; classify material only.
+    if not run.kantoRetaining and CommunityVisuals.customWalls()
+        and map.tileset and map.tileset.id == "OVERWORLD"
+        and run.rise == 0 then
+      local pure, rock = true, false
+      for ty = run.north, run.front do
+        local t = map:tileAt(r.tx, ty)
+        if t == 17 then rock = true
+        elseif t ~= 2 and t ~= 36 and t ~= 19 and t ~= 13 and t ~= 29
+            and t ~= 39 and t ~= 52 and t ~= 54 and t ~= 55 then
+          pure = false
+        end
+      end
+      if pure and rock then run.kantoRetaining = true end
+    end
     for ty = run.north, run.front do
       S.runs[keyOf(r.tx, ty)] = run
     end
@@ -4641,6 +4702,8 @@ function Structures.buildLavenderFlowerbed(S, map, data)
   if not (S and S.lavenderFlowerbed and data) then return 0 end
   if tostring(map.id or ""):upper() ~= "ROUTE_10" then return 0 end
 
+  if CommunityVisuals.customCityGround() then return 0 end
+
   local bed = S.lavenderFlowerbed
   local tpl = flowerTemplate(map, data, OVERWORLD_FLOWER_TILE)
   if not tpl or #tpl == 0 then return 0 end
@@ -4656,7 +4719,7 @@ function Structures.buildLavenderFlowerbed(S, map, data)
       if type(map.isWalkableCell) == "function" then
         blocked = not map:isWalkableCell(math.floor(tx / 2), math.floor(ty / 2))
       end
-      if blocked and (tx + ty) % 2 == 0 then
+      if blocked and (not S.lavenderGardenCells or V.require("TowerGarden").contains(S,tx,ty)) and (tx + ty) % 2 == 0 then
         local wx, wz = tx * 8, ty * 8
         for _, q in ipairs(tpl) do
           quads[#quads + 1] = {

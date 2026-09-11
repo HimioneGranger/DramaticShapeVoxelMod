@@ -8,6 +8,7 @@ local V = ...
 
 local Settings = V.require("PokeballSettings")
 local Bridge = {}
+local Audio=V.require("EmberLegacyAudio")
 
 local activeOwner = nil
 
@@ -21,6 +22,7 @@ local BALL_LAYER_ANIMS = {
   BLOCKBALL_ANIM = true,
   POOF_ANIM = true,
   SHAKE_ANIM = true,
+  SHOWPIC_ANIM = true, -- 3D breakout smoke owns the reappearance visual.
 }
 
 local CAPTURE_FLOW_ANIMS = {
@@ -66,6 +68,7 @@ local function clearOwner(owner)
 end
 
 function Bridge.finish()
+  Audio.clear()
   clearOwner(activeOwner)
   activeOwner = nil
   local s = scene()
@@ -75,6 +78,7 @@ function Bridge.finish()
 end
 
 function Bridge.changed()
+  Audio.sync()
   if not staged() then Bridge.finish() end
 end
 
@@ -85,6 +89,8 @@ function Bridge.install()
       and type(AnimPlayer) == "table") then
     return false
   end
+
+  Audio.install(BattleState)
 
   if type(BattleState.ballChain) == "function"
       and not BattleState.legendaryVisualsBallChain then
@@ -176,6 +182,7 @@ function Bridge.install()
     local previous = AnimPlayer.start
     AnimPlayer.start = function(self, moveId, attackerIsPlayer, opts, ...)
       local owner = activeOwner
+      if type(opts)=="table" and opts.critical~=nil then Audio.critical(opts.critical) end
       if owner and owner._legendaryBallSequence then
         if not staged() then
           Bridge.finish()
@@ -233,6 +240,13 @@ function Bridge.install()
       and not BattleState.legendaryVisualsBallDraw then
     local previous = BattleState.drawAnimLayer
     BattleState.drawAnimLayer = function(self, colorized, ...)
+      -- Entrance POOF can precede sendingOut/model ownership or outlive it.
+      -- Hide its visual for the whole native cue; keep its update/events intact.
+      -- Capture has its own suppression and q57 breakout path below.
+      if staged() and self and self.animName == "POOF_ANIM"
+          and not (self._legendaryBallSequence or self._dsBallSequenceActive) then
+        return
+      end
       local active = staged() and self and self._legendaryBallSequence
       if active and self.lockedBall and self._legendaryBallCaught then
         if not self._legendaryBallCaughtFxSent then

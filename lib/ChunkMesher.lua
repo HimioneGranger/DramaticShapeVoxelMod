@@ -107,6 +107,44 @@ function ChunkMesher.kantoBlock55CourtyardMember(tile)
   return tile == KANTO_BLOCK55_COURT_TILE
 end
 
+-- EDGE1: material exceptions belong to exact authored cliff blocks.
+-- Full-block matching keeps ordinary path corners and wooden bridges intact.
+function ChunkMesher.cliffGroundFinish(tileAt, tx, ty)
+  local tile = tileAt(tx, ty)
+  if tile ~= 35 and tile ~= 60 and tile ~= 57 then return nil end
+  local bx, by = math.floor(tx / 4) * 4, math.floor(ty / 4) * 4
+  local patterns = {
+    {35, "grass", {35,30,1,1,30,39,17,17,39,39,17,17,39,39,17,17}},
+    {60, "grass", {44,44,44,44,44,44,44,44,44,44,44,44,55,52,60,60}},
+    {60, "path", {39,57,57,57,39,57,57,57,39,57,57,57,54,55,60,60}},
+    {60, "path", {57,57,57,57,57,57,57,57,57,57,57,57,60,60,54,55}},
+  }
+  for _, p in ipairs(patterns) do
+    if tile == p[1] or (tile == 57 and p[2] == "path") then
+      local matches = true
+      for i=1,16 do
+        if tileAt(bx+(i-1)%4, by+math.floor((i-1)/4)) ~= p[3][i] then
+          matches=false; break
+        end
+      end
+      if matches then
+        if p[2] == "path" then
+          local connected=false
+          for y=by-1,by+4 do for x=bx-1,bx+4 do
+            if (x==bx-1 or x==bx+4) ~= (y==by-1 or y==by+4) then
+              local t=tileAt(x,y)
+              if t==35 or t==57 then connected=true end
+            end
+          end end
+          if not connected then return "grass" end
+          if tile==57 then return nil end
+        end
+        return p[2]
+      end
+    end
+  end
+end
+
 function ChunkMesher.kantoWoodAxis(isWood, tx, ty)
   local function span(dx, dy)
     local n = 1
@@ -558,24 +596,26 @@ local function shadeRect(c, shade, axisU, u0, u1, axisV, v0, v1, tone)
 end
 
 local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
+  local LG={} -- Group city material state to stay within Lua/LuaJIT local limits.
   local push = sink.push
   local waterPush = waterSink and waterSink.push or nil
   local tileset = map.tileset
   local viridianForest = CommunityVisuals.customForest()
     and tileset.id == "FOREST"
     and tostring(map.id or "") == "VIRIDIAN_FOREST"
-  local mapId = tostring(map.id or ""):upper()
-  local cityGroundMap = CommunityVisuals.isCityGroundMap(map)
+  LG.mapId = tostring(map.id or ""):upper()
+  LG.cityGroundMap = CommunityVisuals.isCityGroundMap(map)
   -- CITY GROUND owns Lavender/Fuchsia independently of the broad GRASS row.
-  local legendaryCityGround = cityGroundMap and CommunityVisuals.customCityGround()
-  local lavenderGround = tileset.id == "OVERWORLD" and mapId == "LAVENDER_TOWN"
-  local lavenderLegendaryGround = lavenderGround and legendaryCityGround
-  local lavenderBattleCurrentGround = lavenderGround and not legendaryCityGround
-  local fuchsiaGround = legendaryCityGround and mapId == "FUCHSIA_CITY"
-  local customGrass = CommunityVisuals.customGrass() and not cityGroundMap
-  local grassReplacement = customGrass or fuchsiaGround
+  LG.legendaryCityGround = LG.cityGroundMap and CommunityVisuals.customCityGround()
+  LG.lavenderGround = tileset.id == "OVERWORLD" and LG.mapId == "LAVENDER_TOWN"
+  LG.lavenderLegendaryGround = LG.lavenderGround and LG.legendaryCityGround
+  local KANTO_PATH_SWATCH_TILE = LG.lavenderLegendaryGround and 35 or KANTO_PATH_SWATCH_TILE
+  LG.fuchsiaGround = LG.legendaryCityGround and LG.mapId == "FUCHSIA_CITY"
+  LG.customGrass = CommunityVisuals.customGrass() and not LG.cityGroundMap
+  LG.grassReplacement = LG.customGrass or LG.fuchsiaGround
+  LG.lavenderBattleCurrentGround = LG.lavenderGround and not LG.legendaryCityGround
   local towerInterior = tileset.id == "CEMETERY"
-    and mapId:match("^POKEMON_TOWER_[1-7]F$") ~= nil
+    and LG.mapId:match("^POKEMON_TOWER_[1-7]F$") ~= nil
     and CommunityVisuals.customTower()
   local S = Structures.forMap(map)
   local perRow = tileset.tilesPerRow or 16
@@ -883,7 +923,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   -- This remains a GRASS-owned route, not a CITY GROUND map.
   local ROUTE10_LAVENDER_APPROACH_ROWS = 11 * 4
   local function route10LavenderApproachAt(ty)
-    return tileset.id == "OVERWORLD" and mapId == "ROUTE_10"
+    return tileset.id == "OVERWORLD" and LG.mapId == "ROUTE_10"
       and ty >= th - ROUTE10_LAVENDER_APPROACH_ROWS and ty < th
   end
 
@@ -896,8 +936,8 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   -- square" immediately north of the checker path. Keep only this authored
   -- seam block as plain grass in BOTH visual modes. No source/collision data
   -- is changed; this is a render-material override for the connection seam.
-  local function route10LavenderExitLawnAt(tx, ty)
-    return tileset.id == "OVERWORLD" and mapId == "ROUTE_10"
+  function LG.route10LavenderExitLawnAt(tx, ty)
+    return tileset.id == "OVERWORLD" and LG.mapId == "ROUTE_10"
       and tx >= 16 and tx <= 19
       and ty >= th - 4 and ty < th
   end
@@ -908,9 +948,9 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   -- approved grass/flower landscaping remains part of Battle Art. This also
   -- gives claimed cells with no neighbour-voted donor an opaque floor instead
   -- of exposing the neutral world underlay as a grey square.
-  local function route10TowerLandscapeAt(tx, ty)
+  function LG.route10TowerLandscapeAt(tx, ty)
     local bed = S.lavenderFlowerbed
-    return tileset.id == "OVERWORLD" and mapId == "ROUTE_10" and bed
+    return tileset.id == "OVERWORLD" and LG.mapId == "ROUTE_10" and not CommunityVisuals.customCityGround() and bed
       and tx >= bed.minX and tx <= bed.maxX
       and ty >= bed.minY and ty <= bed.maxY
   end
@@ -1746,6 +1786,95 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     return KANTO_PATH_TILE[tile] == true
   end
 
+
+  function LG.cliffGroundFinishAt(tx, ty)
+    if tileset.id ~= "OVERWORLD" or (LG.cityGroundMap and not LG.legendaryCityGround) then return nil end
+    local finish = ChunkMesher.cliffGroundFinish(function(x,y)
+      return map:tileAt(x,y)
+    end, tx, ty)
+    if finish == "grass" and CommunityVisuals.customGrass() then return finish end
+    if finish == "path" and CommunityVisuals.customRoads() then return finish end
+  end
+
+  function LG.isLavenderGroundTile(tile)
+    return tile == 48 or tile == KANTO_GRASS_TILE or KANTO_PATH_TILE[tile] == true
+  end
+
+  -- PLAZA1: only Lavender's paired 48/57 town ground becomes paving.
+  -- A map-edge lawn band and all ordinary turf remain green.
+  function LG.lavenderPlazaAt(tx, ty)
+    if tx < 4 or ty < 4 or tx >= tw - 4 or ty >= th - 4 then return false end
+    local k = keyOf(tx, ty)
+    local t = S.tileAt[k]
+    if t == 48 or t == 57 then return true end
+    -- PLAZA2: extracted signs keep their source sign tiles, even when
+    -- their synthesized ground is turf. Resolve the entire 2x2 footprint
+    -- together so paving and edging remain continuous beneath the post.
+    local shape = S.shapeAt[k]
+    if not (S.skip[k] and shape and shape.class == "signpost") then return false end
+    local sx, sy = math.floor(tx / 2) * 2, math.floor(ty / 2) * 2
+    for y = sy - 1, sy + 2 do
+      for x = sx - 1, sx + 2 do
+        if x < sx or x > sx + 1 or y < sy or y > sy + 1 then
+          local neighbor = S.tileAt[keyOf(x, y)]
+          if x >= 4 and y >= 4 and x < tw - 4 and y < th - 4
+              and (neighbor == 48 or neighbor == 57) then return true end
+        end
+      end
+    end
+    return false
+  end
+
+  function LG.lavenderPlazaTop(tx, ty, x0, z0, h, shade)
+    local uvJoint = rockUV(48, ROCK_TEXEL.dark)
+    local uvBody = rockUV(48, ROCK_TEXEL.body)
+    local uvTrim = rockUV(48, ROCK_TEXEL.shadow)
+    local function rect(ax, az, bx, bz, y, uv, tone)
+      if bx <= ax or bz <= az then return end
+      local corners={{ax,y,az},{bx,y,az},{bx,y,bz},{ax,y,bz}}
+      local lit=shadeRect(corners,shade,1,x0,x0+8,3,z0,z0+8,tone)
+      if type(lit) ~= "table" then lit={lit,lit,lit,lit} end
+      for i,c in ipairs(corners) do
+        lit[i]=lit[i]*(.97+smoothPathNoise(c[1],c[3],1209)*.06)
+      end
+      pushSolid(corners,uv,lit)
+    end
+    -- Recessed seam bed, with flush narrow edging where paving ends.
+    rect(x0,z0,x0+8,z0+8,h,uvJoint,1)
+    local west = not LG.lavenderPlazaAt(tx-1,ty) and 0.85 or 0
+    local east = not LG.lavenderPlazaAt(tx+1,ty) and 0.85 or 0
+    local north = not LG.lavenderPlazaAt(tx,ty-1) and 0.85 or 0
+    local south = not LG.lavenderPlazaAt(tx,ty+1) and 0.85 or 0
+    rect(x0,z0,x0+west,z0+8,h+0.025,uvTrim,1.10)
+    rect(x0+8-east,z0,x0+8,z0+8,h+0.025,uvTrim,1.10)
+    rect(x0+west,z0,x0+8-east,z0+north,h+0.025,uvTrim,1.10)
+    rect(x0+west,z0+8-south,x0+8-east,z0+8,h+0.025,uvTrim,1.10)
+    -- 24 x 16 world-unit flags: seams span the source tiles, alternate
+    -- rows offset by half a flag. No extra collision or runtime objects.
+    for row=math.floor(z0/16),math.floor((z0+7.999)/16) do
+      local offset=(row%2)*12
+      for col=math.floor((x0-offset)/24),math.floor((x0+7.999-offset)/24) do
+        local xs, zs=col*24+offset,row*16
+        local tone=0.965+rockNoise(col,row,1201)*0.07
+        rect(math.max(x0+west,xs+0.10),math.max(z0+north,zs+0.10),
+             math.min(x0+8-east,xs+23.90),math.min(z0+8-south,zs+15.90),
+             h+0.025,uvBody,tone)
+      end
+    end
+  end
+
+  function LG.legendaryLavenderTop(tx, ty, x0, z0, h, shade, tile)
+    -- Inferred prop/structure ground must use the local finish. Only
+    -- a real source road may request the tan road material here.
+    if LG.lavenderPlazaAt(tx, ty) then
+      LG.lavenderPlazaTop(tx, ty, x0, z0, h, shade)
+    elseif tile == 35 and map:tileAt(tx, ty) == 35 then
+      kantoPavedTop(tx, ty, x0, z0, h, shade)
+    else
+      kantoGrassTop(tx, ty, x0, z0, h, shade)
+    end
+  end
+
   local function woodRect(axis, across0, across1, along0, along1, y)
     if axis == "z" then
       return { { across0, y, along0 }, { across1, y, along0 },
@@ -1833,6 +1962,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
 
   local function ledgeRockSide(d, tx, ty, x0, z0, y0, y1,
                                tile, shade)
+    tile = RETAINING_SWATCH_TILE
     local uvDark = rockUV(tile, ROCK_TEXEL.dark)
     local uvShadow = rockUV(tile, ROCK_TEXEL.shadow)
     local uvBody = rockUV(tile, ROCK_TEXEL.body)
@@ -2474,6 +2604,25 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     return false
   end
 
+  -- WALL4: legacy object/volume faces using cliff UVs receive the same
+  -- world-aligned masonry as retained terrain, not an enlarged 8px bitmap.
+  if tileset.id == "OVERWORLD" and CommunityVisuals.customWalls() then
+    push = V.require("CliffMasonry").wrap(push, atlasW, atlasH,
+      function(emit, top, side, x, z, y0, y1, shade)
+        local saved = push
+        push = emit
+        local ok, err
+        if top then
+          ok, err = pcall(ledgeRockTop, math.floor(x/8), math.floor(z/8),
+                          x, z, y0, RETAINING_SWATCH_TILE, shade)
+        else
+          ok, err = pcall(retainingRockSide, side, x, z, y0, y1, shade)
+        end
+        push = saved
+        if not ok then error(err, 0) end
+      end)
+  end
+
   for ty = -r, th + r - 1 do
     for tx = -r, tw + r - 1 do
       Budget.tick()
@@ -2513,7 +2662,8 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
         -- an object stands here; paint its synthesized ground and let the
         -- prebuilt prism quads (appended below) carry the art
         local g = S.ground[k]
-        if route10TowerLandscapeAt(tx, ty) or route10LavenderExitLawnAt(tx, ty) then
+        if LG.lavenderLegendaryGround and LG.lavenderPlazaAt(tx,ty) then g=57 end
+        if LG.route10TowerLandscapeAt(tx, ty) or LG.route10LavenderExitLawnAt(tx, ty) then
           -- These Lavender-edge floors are deliberately independent of the
           -- GRASS option. Use Route 10's grass donor for both the Tower claim
           -- and the exact south-connection apron; claims/collision remain
@@ -2522,23 +2672,38 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
                         aoShades(tx, ty, 0, 1))
         elseif g then
           local caveKind = caveSurfaceKind({ class="ground" }, g)
-          if viridianForest then
+          local edgeFinish=LG.cliffGroundFinishAt(tx,ty)
+          if V.require("TowerGarden").contains(S,tx,ty) then edgeFinish="towerGarden" end
+          if edgeFinish=="towerGarden" then
+            local x,z=tx*8,ty*8
+            push({{x,0,z},{x+8,0,z},{x+8,0,z+8},{x,0,z+8}},
+              pavedUV(48,math.floor(rockNoise(tx,ty,1193)*4)),
+              grassShades(x,z,aoShades(tx,ty,0,1)))
+          elseif edgeFinish=="grass" then
+            kantoGrassTop(tx,ty,tx*8,ty*8,0,aoShades(tx,ty,0,1))
+          elseif edgeFinish=="path" then
+            kantoPavedTop(tx,ty,tx*8,ty*8,0,aoShades(tx,ty,0,1))
+          elseif viridianForest then
             forestGroundTop(tx, ty, tx * 8, ty * 8, 0, 0, 1)
           elseif towerInterior then
             towerGraniteTop(tx, ty, tx * 8, ty * 8, 0,
                             1, g, g == 34 and "healing" or false)
           elseif caveKind then
             caveNaturalTop(tx, ty, tx * 8, ty * 8, 0, 1, caveKind)
-          elseif lavenderGround then
+          elseif LG.lavenderLegendaryGround then
+            LG.legendaryLavenderTop(tx,ty,tx*8,ty*8,0,aoShades(tx,ty,0,1),g)
+          elseif LG.lavenderGround then
             -- Preserve Lavender's authored path membership even under signs
             -- and claimed building edges. Only the material family changes.
             if lavenderPathTile(g) then
               kantoPavedTop(tx, ty, tx * 8, ty * 8, 0,
                             aoShades(tx, ty, 0, 1))
-            elseif lavenderLegendaryGround then
+            elseif LG.lavenderLegendaryGround then
+              -- Legendary Lavender uses the same vivid lawn geometry as the
+              -- approved bright Route 10 grass instead of mauve city earth.
               kantoGrassTop(tx, ty, tx * 8, ty * 8, 0,
                             aoShades(tx, ty, 0, 1))
-            elseif lavenderBattleCurrentGround then
+            elseif LG.lavenderBattleCurrentGround then
               -- Battle Art snapshots the CURRENT approved Legendary lawn, but
               -- keeps its own branch so a future Legendary revision can change
               -- without taking this baseline away.
@@ -2553,19 +2718,21 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
             -- From Rock Tunnel to the Lavender seam, Battle Art is one sandy
             -- field regardless of which flat donor the source block used.
             -- Legendary GRASS turns the exact same coverage vivid green.
-            if customGrass then
+            if LG.customGrass then
               kantoGrassTop(tx, ty, tx * 8, ty * 8, 0,
                             aoShades(tx, ty, 0, 1))
             else
               kantoPavedTop(tx, ty, tx * 8, ty * 8, 0,
                             aoShades(tx, ty, 0, 1))
             end
+          elseif LG.grassReplacement and tileset.id == "OVERWORLD" and (g==44 or g==48) then
+            kantoGrassTop(tx,ty,tx*8,ty*8,0,aoShades(tx,ty,0,1))
           elseif CommunityVisuals.customRoads() and KANTO_PATH_TILE[g] then
             local finish, finishAxis = claimedPathFinishAt(tx, ty)
             if finish == "wood" then
               kantoWoodTop(tx, ty, tx * 8, ty * 8, 0,
                            aoShades(tx, ty, 0, 1), finishAxis)
-            elseif finish == "grass" and grassReplacement then
+            elseif finish == "grass" and LG.grassReplacement then
               kantoGrassTop(tx, ty, tx * 8, ty * 8, 0,
                             aoShades(tx, ty, 0, 1))
             else
@@ -2652,7 +2819,12 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           -- Ship portholes belong on vertical faces; tile 16 is plain white.
           if map.tileset.id == "SHIP" and s.class == "wall" then topTile = 16 end
           local caveKind = caveSurfaceKind(s, tile)
-          if towerInterior and s.class == "wall" then
+          local edgeFinish=s.class=="ground" and LG.cliffGroundFinishAt(tx,ty)
+          if edgeFinish=="grass" then
+            kantoGrassTop(tx,ty,x0,z0,h,aoShades(tx,ty,h,1))
+          elseif edgeFinish=="path" then
+            kantoPavedTop(tx,ty,x0,z0,h,aoShades(tx,ty,h,1))
+          elseif towerInterior and s.class == "wall" then
             towerGraniteTop(tx, ty, x0, z0, h,
                             VOLUME_TOP_SHADE,
                             TOWER_GRANITE_SWATCH_TILE, "wall")
@@ -2711,7 +2883,12 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           -- on the pond.
           local paved = kantoSurfaceKind(s, tile)
           local caveKind = caveSurfaceKind(s, tile)
-          if towerInterior and s.class == "wall" then
+          local edgeFinish=s.class=="ground" and LG.cliffGroundFinishAt(tx,ty)
+          if edgeFinish=="grass" then
+            kantoGrassTop(tx,ty,x0,z0,h,aoShades(tx,ty,h,1))
+          elseif edgeFinish=="path" then
+            kantoPavedTop(tx,ty,x0,z0,h,aoShades(tx,ty,h,1))
+          elseif towerInterior and s.class == "wall" then
             towerGraniteTop(tx, ty, x0, z0, h,
                             s.art == "upright" and VOLUME_TOP_SHADE or 1,
                             TOWER_GRANITE_SWATCH_TILE, "wall")
@@ -2726,16 +2903,18 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           elseif viridianForest and s.class == "ground" then
             forestGroundTop(tx, ty, x0, z0, h, topTile,
                             s.art == "upright" and VOLUME_TOP_SHADE or 1)
-          elseif lavenderGround and s.class == "ground" then
+          elseif LG.lavenderLegendaryGround and s.class == "ground" then
+            LG.legendaryLavenderTop(tx,ty,x0,z0,h,aoShades(tx,ty,h,1),topTile)
+          elseif LG.lavenderGround and s.class == "ground" then
             local lavenderPath = lavenderPathTile(tile) or lavenderPathTile(topTile)
             if lavenderPath then
               -- Same textured path treatment used by the connected Kanto
               -- roads; the source $23/$39 cells retain their exact topology.
               kantoPavedTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))
-            elseif lavenderLegendaryGround then
+            elseif LG.lavenderLegendaryGround then
               kantoGrassTop(tx, ty, x0, z0, h,
                             aoShades(tx, ty, h, 1))
-            elseif lavenderBattleCurrentGround then
+            elseif LG.lavenderBattleCurrentGround then
               kantoGrassTop(tx, ty, x0, z0, h,
                             aoShades(tx, ty, h, 1))
             end
@@ -2747,7 +2926,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
                             1, topTile,
                             (tile == 34 or topTile == 34)
                               and "healing" or false)
-          elseif route10LavenderExitLawnAt(tx, ty) and s.class == "ground" then
+          elseif LG.route10LavenderExitLawnAt(tx, ty) and s.class == "ground" then
             -- This must win before the generic $39 path branch below. The
             -- authored seam block is entirely $39, but visually it belongs to
             -- Lavender's plain lawn rather than the checker/path network.
@@ -2757,13 +2936,13 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
           elseif paved == "wood" then
             kantoWoodTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))
           elseif route10LavenderApproachAt(ty) and s.class == "ground" then
-            if customGrass then
+            if LG.customGrass then
               kantoGrassTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))
             else
               kantoPavedTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))
             end
-          elseif grassReplacement and tileset.id == "OVERWORLD"
-                 and s.class == "ground" and topTile == KANTO_GRASS_TILE then
+          elseif LG.grassReplacement and tileset.id == "OVERWORLD"
+                 and s.class == "ground" and (topTile == KANTO_GRASS_TILE or topTile == 48) then
             kantoGrassTop(tx, ty, x0, z0, h, aoShades(tx, ty, h, 1))
           -- Legendary ledge masonry belongs to Kanto's outdoor terrain.
           -- CAVERN also uses `ledge` for its raised lit shelf, and sending
@@ -2849,7 +3028,12 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
                 -- facets cross hidden tile and vertical-band boundaries with
                 -- no courses, mortar, repeated blocks or manufactured joints.
                 -- Outdoor retaining walls keep their independent masonry path.
-                if towerInterior and s.class == "wall" then
+                local edgeFinish=s.class=="ground" and LG.cliffGroundFinishAt(tx,ty)
+          if edgeFinish=="grass" then
+            kantoGrassTop(tx,ty,x0,z0,h,aoShades(tx,ty,h,1))
+          elseif edgeFinish=="path" then
+            kantoPavedTop(tx,ty,x0,z0,h,aoShades(tx,ty,h,1))
+          elseif towerInterior and s.class == "wall" then
                   towerGraniteSide(d, x0, z0, y0, y1, faceShade)
                 elseif towerInterior and s.class == "counter" then
                   towerGraniteCounterSide(d, x0, z0, y0, y1, faceShade)

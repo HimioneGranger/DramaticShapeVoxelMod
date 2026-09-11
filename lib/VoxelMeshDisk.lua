@@ -481,6 +481,7 @@ function Disk.fingerprint(map, slot, masks, kind)
   -- survey/title-screen mask discovery enter this key creates false variants.
   if slot == "body" then masks = nil end
   local def, tileset = map.def or {}, map.tileset or {}
+  local mapId = tostring(map.id or ""):upper()
   local parts = {
     "rev", tostring(Disk.CACHE_REVISION),
     "mod", Disk.CACHE_FAMILY,
@@ -506,6 +507,13 @@ function Disk.fingerprint(map, slot, masks, kind)
   -- Final contract: brick courses, bridge boards, crown-lock and the
   -- grain-mapped TEST435 fence must never reuse an older community mesh.
   parts[#parts + 1] = "legendary-visuals-final"
+  parts[#parts + 1] = "interiors56"
+  parts[#parts + 1] = CommunityVisuals.casino:get()
+  parts[#parts + 1] = CommunityVisuals.prizeRoom:get()
+  parts[#parts + 1] = CommunityVisuals.tunnels:get()
+  parts[#parts + 1] = CommunityVisuals.rocket:get()
+  parts[#parts + 1] = CommunityVisuals.elevator:get()
+
   parts[#parts + 1] = CommunityVisuals.layout()
   parts[#parts + 1] = CommunityVisuals.trees:get()
   parts[#parts + 1] = CommunityVisuals.forest:get()
@@ -517,7 +525,9 @@ function Disk.fingerprint(map, slot, masks, kind)
   -- TEST83 changes only the opted-in Legendary sign support geometry.  Name
   -- that contract directly instead of invalidating Battle Art/default maps
   -- with a global cache-revision bump.
+  if mapId:match("^ROCKET_HIDEOUT_B[1-4]F$") or mapId=="ROCKET_HIDEOUT_ELEVATOR" then parts[#parts+1]="rocket6-elevator-steel-cabin" end
   if CommunityVisuals.customSigns() then
+    if mapId=="LAVENDER_TOWN" then parts[#parts+1]="lavender-tower-sign-north-v1" end
     parts[#parts + 1] = "kanto-wayfinder-viridian-v6"
     parts[#parts + 1] = "sign-labels"
     for _, sign in ipairs(def.signs or {}) do
@@ -526,7 +536,9 @@ function Disk.fingerprint(map, slot, masks, kind)
       parts[#parts + 1] = tostring(sign.text)
     end
   end
-  local mapId = tostring(map.id or ""):upper()
+  if mapId:match("^UNDERGROUND_PATH_") then parts[#parts+1]="underground1-stone-shell" end
+  if mapId=="GAME_CORNER_PRIZE_ROOM" then parts[#parts+1]="prizes1-redemption-room" end
+  if mapId=="GAME_CORNER" then parts[#parts+1]="casino4-jackpot-poster" end
   local cityGroundMap = CommunityVisuals.isCityGroundMap(map)
   -- CITY GROUND fully owns Lavender/Fuchsia turf. The broad GRASS row is not
   -- a geometry/material input there, so do not create redundant city cache
@@ -540,17 +552,22 @@ function Disk.fingerprint(map, slot, masks, kind)
     -- reused from disk.
     parts[#parts + 1] = "closed-tall-grass-v5-east-edge-softened"
   end
+  if mapId:match("^UNDERGROUND_PATH_") then parts[#parts+1]="tunnels3-exclusive-stairs-closed-corners" end
   if mapId == "ROUTE_10" then
     -- The final eleven block rows share the cave-to-Lavender treatment.
     -- The Tower lawn is body geometry and the baseline flowerbed lives in AUX.
     parts[#parts + 1] = "route10-lavender-approach-v3-exit-lawn"
+    parts[#parts+1]="legendary-garden7-matched-apron"
+    parts[#parts+1]=CommunityVisuals.cityGround:get()
     if kind == "aux" then
       parts[#parts + 1] = "route10-tower-flowerbed-v2-baseline"
     end
   end
   parts[#parts + 1] = CommunityVisuals.roads:get()
+  if tileset.id=="OVERWORLD" then parts[#parts+1]="ember106-wall4-ground2-edge1" end
   if cityGroundMap then
-    parts[#parts + 1] = "city-ground-option-v4"
+    parts[#parts + 1] = "city-ground-ember106-v1"
+    if mapId=="LAVENDER_TOWN" then parts[#parts+1]=CommunityVisuals.towerWallStyle() end
     parts[#parts + 1] = CommunityVisuals.cityGround:get()
     if mapId == "LAVENDER_TOWN" then
       -- Battle Art now snapshots the current Legendary Lavender lawn/path

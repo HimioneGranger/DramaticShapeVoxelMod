@@ -638,7 +638,7 @@ local TALL_GRASS = {
 
 local function communityKey()
   return table.concat({
-    CommunityVisuals.cityGround:get(), CommunityVisuals.grass:get(),
+    CommunityVisuals.rocket:get(), CommunityVisuals.cityGround:get(), CommunityVisuals.grass:get(),
     CommunityVisuals.roads:get(),
     CommunityVisuals.walls:get(), CommunityVisuals.courtyards:get(),
     CommunityVisuals.wallColor(), CommunityVisuals.caves:get(),
@@ -693,25 +693,37 @@ local function applyCaveCommunityMaterials(map, total, paint, recolor)
 end
 
 local function applyLavenderCommunityMaterials(paint, legendary)
-  if legendary then
-    -- Keep this as an explicit mode branch even though it matches Battle Art
-    -- today: the Legendary author can revise this side later without changing
-    -- the Battle Art baseline captured below.
+  if not legendary then
+    -- Absol's 1.10.7 Battle Art lawn/path palette stays separate.
     paint(35, PATH_ART, LAVENDER_PATH)
     paint(44, GRASS_ART, ROUTE10_GRASS)
     paint(57, PATH_ART, LAVENDER_PATH)
     return
   end
-  -- Battle Art deliberately snapshots the CURRENT approved Legendary
-  -- Lavender treatment: same lavender-grey paths and vivid green lawn.
-  paint(35, PATH_ART, LAVENDER_PATH)
-  paint(44, GRASS_ART, ROUTE10_GRASS)
-  paint(57, PATH_ART, LAVENDER_PATH)
+  -- Legendary-only street swatches; Battle Art's branch above stays intact.
+  local style=CommunityVisuals.towerWallStyle()
+  local palette
+  if style=="pearl_white" then
+    palette={dark={.36,.35,.38,1},shadow={.56,.54,.57,1},
+      body={.78,.76,.75,1},light={.84,.82,.80,1}}
+  elseif style=="storm_white" then
+    palette={dark={.25,.27,.32,1},shadow={.40,.43,.49,1},
+      body={.63,.66,.71,1},light={.70,.73,.77,1}}
+  else
+    palette={dark={.15,.14,.19,1},shadow={.25,.23,.30,1},
+      body={.40,.37,.46,1},light={.47,.44,.53,1}}
+  end
+  paint(35,PATH_ART,LAVENDER_PATH)
+  paint(44,GRASS_ART,GRASS)
+  paint(48,{"DSBLBBBB","BBBBBBBB","BBBBBBBB","BBBBBBBB",
+    "BBBBBBBB","BBBBBBBB","BBBBBBBB","BBBBBBBB"},palette)
+  paint(57,GRASS_ART,GRASS)
 end
 
 local function communityAtlas(map, colors, base, baked)
   local tilesetId = map.tileset and map.tileset.id
   local mapId = tostring(map.id or ""):upper()
+  local rocket = CommunityVisuals.rocket:get()=="n64memory" and tilesetId == "FACILITY" and mapId:match("^ROCKET_HIDEOUT_B[1-4]F$") ~= nil
   local cave = tilesetId == "CAVERN"
   local cityGroundMap = CommunityVisuals.isCityGroundMap(map)
   local legendaryCityGround = cityGroundMap and CommunityVisuals.customCityGround()
@@ -724,7 +736,8 @@ local function communityAtlas(map, colors, base, baked)
   local towerInterior = tilesetId == "CEMETERY"
     and mapId:match("^POKEMON_TOWER_[1-7]F$") ~= nil
     and CommunityVisuals.customTower()
-  local overworldEnabled = grassEnabled or lavenderGround
+  local overworldEnabled = (mapId=="ROUTE_10" and V.require("TowerGarden").enabled())
+    or grassEnabled or lavenderGround
     or CommunityVisuals.customRoads() or CommunityVisuals.customWalls()
     or CommunityVisuals.customCourtyards()
   local forestEnabled = tilesetId == "FOREST"
@@ -737,7 +750,7 @@ local function communityAtlas(map, colors, base, baked)
     return base, baked
   end
   if not cave and tilesetId ~= "OVERWORLD"
-      and not forestEnabled and not towerInterior then
+      and not forestEnabled and not towerInterior and not rocket then
     return base, baked
   end
   if not (love.image and love.image.newImageData and love.graphics
@@ -746,10 +759,10 @@ local function communityAtlas(map, colors, base, baked)
   -- CITY GROUND changes shared OVERWORLD donors per map. Keep both city maps
   -- isolated even on BATTLE ART: another Legendary Overworld atlas must never
   -- leak its grass donor into a city whose own row is disabled.
-  local perMap = (cityGroundMap or mapId == "ROUTE_10" or towerInterior
+  local perMap = (rocket or cityGroundMap or mapId == "ROUTE_10" or towerInterior
       or (map.renderer and map.renderer.gbcAtlas))
     and tostring(map.id or "") or ""
-  local key = map.tileset.image .. "#community-test137-tower-master-wall-options#" .. communityKey()
+  local key = map.tileset.image .. "#ember107-rocket2-materials#" .. communityKey()
     .. "#" .. paletteKey(colors or {}) .. perMap
   local held = community[key]
   if held then return held.image, held.data end
@@ -801,6 +814,17 @@ local function communityAtlas(map, colors, base, baked)
       end
     end
 
+    if rocket then
+      local steel={{.44,.46,.48},{.36,.38,.40},{.27,.29,.31},{.18,.20,.22}}
+      local raw=Assets.imageData(map.tileset.image)
+      for _,tile in ipairs({2,3,4,8,9,10,11,12,13,14,18,19,24,25,26,27,28,29,30,36,37,40,41,42,43,44,45,46,52,53,56,57,58,59,60,64,65,67,68,69,74,75,76,77,78,80,81,86,87,88,89})do
+        recolor(tile,steel,raw)
+      end
+      paint(1,{"BBBBBBBB","BBBBBBBB","BBBBBBBB","BBBBBBBB",
+        "BBBBBBBB","BBBBBBBB","BBBBBBBB","BBBBBBBB"},
+        {dark={.105,.12,.14},body={.25,.27,.30},light={.30,.32,.35},shadow={.18,.20,.23}})
+      -- Spin arrows / stop pads (32/33/48/49/94) retain their original art.
+    end
     if cave then applyCaveCommunityMaterials(map, total, paint, recolor) end
 
     if tilesetId == "OVERWORLD" and CommunityVisuals.customWalls() then
@@ -812,6 +836,24 @@ local function communityAtlas(map, colors, base, baked)
       end
       -- Safe swatch used by the community retaining/pillar material family.
       paint(13, ROCK_ART, masonry)
+      -- WALL2: the actual cliff source family. In the original OVERWORLD
+      -- blockset tile 1 caps the speckled tile-17 mass; tile 30 is the
+      -- northwest diagonal in block $3E. Other builders can draw those
+      -- source UVs directly, bypassing ChunkMesher's wall classification.
+      -- Remap the display copy only: structural analysis still sees the
+      -- original source pixels, and DEFAULT keeps the original atlas.
+      local cliffMasonry = {
+        "DDDDDDDD", "DLLLLLLL", "DBBBBBBB", "DSSSSSSS",
+        "DDDDDDDD", "LLLLDLLL", "BBBBDBBB", "SSSSDSSS",
+      }
+      paint(1, cliffMasonry, masonry)
+      paint(17, cliffMasonry, masonry)
+      paint(30, cliffMasonry, masonry)
+      -- WALL3: the two inward cliff turns. Original blocks $2A and $2B
+      -- use 19 and 53 respectively; neither occurs outside those cliff
+      -- blocks. Cover both orientations in direct source-UV draws too.
+      paint(19, cliffMasonry, masonry)
+      paint(53, cliffMasonry, masonry)
     end
 
     if tilesetId == "OVERWORLD" and CommunityVisuals.customRoads() then
@@ -830,6 +872,7 @@ local function communityAtlas(map, colors, base, baked)
     end
 
     if tilesetId == "OVERWORLD" and grassEnabled then
+      if not cityGroundMap then paint(48, GRASS_ART, GRASS) end
       paint(44, GRASS_ART, mapId == "ROUTE_10" and ROUTE10_GRASS or GRASS)
       local tall = map.tileset.grassTile
       if type(tall) == "number" then tall = math.floor(tall) end
@@ -856,6 +899,11 @@ local function communityAtlas(map, colors, base, baked)
       end
     end
 
+    if mapId=="ROUTE_10" and V.require("TowerGarden").enabled() then
+      paint(48,GRASS_ART,GRASS)
+      -- Match the exit apron and garden donor even when GRASS is Battle Art.
+      if CommunityVisuals.customCityGround() then paint(44,GRASS_ART,GRASS) end
+    end
     if lavenderGround then applyLavenderCommunityMaterials(paint, legendaryCityGround) end
 
     if towerInterior then

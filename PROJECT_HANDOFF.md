@@ -489,3 +489,25 @@ reused.
 Release follow-up: after in-engine confirmation that the Route 10 exit lawn fix
 worked, the user explicitly approved bumping both version surfaces to `1.10.7`
 and tagging that new branch head as `1.10.7`.
+
+## TEST56 merge into 1.10.8 (2026-09-11)
+
+Merged Desktop Test56 non-destructively into the user-requested 1.10.8 branch.
+See docs/TEST56_MERGE_1.10.8.md for provenance, scope, menu mapping, exclusions,
+and validation. Current Battle Art Lavender/Route 10 fixes and tree-detail
+submenu are retained. New casino/prize room and interior toggles default to
+Battle Art, with saved selections preserved. Legendary Visuals now groups
+Game Corner, Lavender & Cities, and Interiors. Capture options retain the
+donor Ember Legacy grouping. Package version remains 1.10.7; no commit/push.
+
+Legendary media now lives exclusively under assets/legendary/, including
+ember-legacy/poke_ball audio. All 44 files match Test56 hashes; old lib media
+was removed only after verifying identical destination copies. Media stays
+ignored and must be distributed separately. Concurrent .gitignore edits kept.
+
+The donor hosted-flight patch was withheld because it replaces companion
+methods; existing hosted provider behavior remains. Native Fly changes are
+included. Corrected donor capability-query drawing and cleared map-local lamp
+state at scene end. LuaJIT compiled 151 Lua files; 18 standalone suites and
+91 interior/menu, 55 city-ground, 216 Lavender-approach assertions passed.
+These are local static/mocked checks, not Android gameplay/visual validation.

@@ -19,6 +19,7 @@ local ShadowMap = V.require("ShadowMap")
 local Shadows = V.require("Shadows")
 local ChunkMesher = V.require("ChunkMesher")
 local SpriteBillboards = V.require("SpriteBillboards")
+local ItemPokeballs = V.require("ItemPokeballs")
 local TileShape = V.require("TileShape")
 local TerrainAtlas = V.require("TerrainAtlas")
 local Voxel = V.require("VoxelState")
@@ -202,6 +203,8 @@ local YAW = {
 -- top of it rather than sunk into it. Uses the same bottom-left collision
 -- tile the engine walks on (Map:cellTile).
 local function groundAt(map, cellX, cellY, px, py)
+  local casinoSupport=V.require("GameCorner").support(map,cellX,cellY)
+  if casinoSupport~=nil then return casinoSupport end
   -- Cave shelf flights are traversed, unlike instant warp stairs. Read the
   -- same contact point the character mesh and shadow use, including frames
   -- before the engine advances cellX/cellY. All other support stays exact.
@@ -529,6 +532,7 @@ local function rebuildNeighborhood(state)
   cachedMasks = masks
   TerrainAtlas.setLive(live)
   SafariFoliage.setLive(live)
+  V.require("GameCorner").setLive(live)
   SafariStatues.setLive(live)
   if GranitePillars.setLive then GranitePillars.setLive(live) end
 end
@@ -634,8 +638,10 @@ local function heldFrame(w, h, mapId)
 end
 
 function VoxelScene.invalidate()
+  ItemPokeballs.invalidate()
   GranitePillars.invalidate()
   SafariFoliage.invalidate()
+  V.require("GameCorner").invalidate()
   SafariStatues.invalidate()
   CommunityFlora.invalidate()
   ForestDressing.invalidate()
@@ -869,7 +875,7 @@ local function drawCast(state, posed, atlasFor)
       -- claim this pass; otherwise retain the mirrored engine sprite.
       context.reflectionPlane = reflectPlane
       context.reflectionRaise = Water.CAST_RAISE
-      local claimed = CharacterRenderers.first(
+      local claimed = ItemPokeballs.draw(context) or CharacterRenderers.first(
         reflectPlane and "drawReflection" or "drawEntity", context)
       if not claimed then
         drawEntity(p.sprite, p.px, p.py, facing, p.phase, p.flip, p.gh,
@@ -1208,6 +1214,12 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
   -- not. Ground, roofs and the characters themselves take them as before.
   SafariFoliage.draw(state.map,0,0,ShadowMap)
   for _,nb in ipairs(state.neighbors or {})do if RenderDistance.neighbor(nb,state.player)then SafariFoliage.draw(nb.map,nb.ox or 0,nb.oy or 0,ShadowMap)end end
+  V.require("GameCorner").draw(state.map,ShadowMap)
+  for _,nb in ipairs(state.neighbors or {})do
+    if RenderDistance.neighbor(nb,state.player)then
+      V.require("LegendaryGarden").draw(nb.map,ShadowMap,Mat4.translate(nb.ox,0,nb.oy))
+    end
+  end
   SafariStatues.draw(state.map,0,0,ShadowMap,atlasFor(state.map))
   for _,nb in ipairs(state.neighbors or {})do if RenderDistance.neighbor(nb,state.player)then SafariStatues.draw(nb.map,nb.ox or 0,nb.oy or 0,ShadowMap,atlasFor(nb.map))end end
   ShadowMap.sprites(true)
@@ -1234,7 +1246,7 @@ local function castShadows(state, terrain, nbMesh, posed, cx, cy, vw, vh,
       local facing = viewFacing(p)
       local context = actorContext(state, p)
       context.facing = facing
-      local claimed = CharacterRenderers.first("drawShadow", context)
+      local claimed = ItemPokeballs.draw(context, ShadowMap) or CharacterRenderers.first("drawShadow", context)
       if not claimed then
         local def = p.sprite.def
         -- viewFacing, exactly as the camera draw picks it (see viewFacing for
@@ -1401,6 +1413,7 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
               state, terrain, nbMesh, posed, shCx, shCy, vw, vh, atlasFor,
               water, nbWater, visualShadows, nbVisualShadows)
 
+  V.require("StreetLights").configure(state)
   if not Voxel3D.beginScene(w, h, cx, cy, vw, vh, skyFor(state.map)) then
     Voxel3D.setCompanionCameraDelta(nil)
     Voxel3D.fog = nil
@@ -1454,8 +1467,15 @@ function VoxelScene.render(state, w, h, vw, vh, paletteFor)
 
   SafariFoliage.draw(state.map,0,0)
   for _,nb in ipairs(state.neighbors or {})do if RenderDistance.neighbor(nb,state.player)then SafariFoliage.draw(nb.map,nb.ox or 0,nb.oy or 0)end end
+  V.require("GameCorner").draw(state.map)
+  for _,nb in ipairs(state.neighbors or {})do
+    if RenderDistance.neighbor(nb,state.player)then
+      V.require("LegendaryGarden").draw(nb.map,nil,Mat4.translate(nb.ox,0,nb.oy))
+    end
+  end
   SafariStatues.draw(state.map,0,0,nil,atlasFor(state.map))
   for _,nb in ipairs(state.neighbors or {})do if RenderDistance.neighbor(nb,state.player)then SafariStatues.draw(nb.map,nb.ox or 0,nb.oy or 0,nil,atlasFor(nb.map))end end
+  V.require("StreetLights").draw(state)
   GranitePillars.draw(state.map,0,0)
   for _,nb in ipairs(state.neighbors or {}) do if RenderDistance.neighbor(nb,state.player) then GranitePillars.draw(nb.map,nb.ox or 0,nb.oy or 0) end end
 

@@ -525,6 +525,8 @@ mod.content.render_pipelines:register("voxel", {
     VoxelScene.invalidate()
     Voxel3D.invalidate()
     V.require("Pokeball").invalidate()
+    V.require("SuccessStars").invalidate()
+    V.require("EmberLegacyAudio").clear()
     OverworldBattle.invalidate()
     AntiAlias.invalidate()
     VoxelLoadingVeil.invalidate()
@@ -651,6 +653,12 @@ local function stagedBattles()
 end
 
 local SETTINGS = {
+  { CommunityVisuals.casino, "Choose Battle Art or Legendary Visuals for casino. Rebuilds the room when changed.", full = true },
+  { CommunityVisuals.prizeRoom, "Choose Battle Art or Legendary Visuals for prize room. Rebuilds the room when changed.", full = true },
+  { CommunityVisuals.tunnels, "Choose Battle Art or Legendary Visuals for tunnels. Rebuilds the room when changed.", full = true },
+  { CommunityVisuals.rocket, "Choose Battle Art or Legendary Visuals for rocket hideout. Rebuilds the room when changed.", full = true },
+  { CommunityVisuals.elevator, "Choose Battle Art or Legendary Visuals for rocket elevator. Rebuilds the room when changed.", full = true },
+
   { CommunityVisuals.pillars,
     "Choose the original Battle Art pillars or the community granite design: "
     .. "standalone, joined by the approved low wall, or interlocked across "
@@ -738,12 +746,11 @@ local SETTINGS = {
     .. "Kanto wayfinder with live location labels, including Viridian Forest.",
     full = true },
   { CommunityVisuals.cityGround,
-    "Choose Battle Art city ground or Legendary Visuals' city treatment. "
-    .. "Lavender Battle Art now keeps the currently approved Legendary look as "
-    .. "its baseline: vivid green lawn, lavender-grey authored paths, and the "
-    .. "existing Tower flower landscaping. Legendary currently matches it but "
-    .. "remains separately selectable so a future Legendary revision can diverge. "
-    .. "Fuchsia still follows this switch independently of GRASS.",
+    "Choose Battle Art or Legendary Visuals city ground. Lavender Battle Art "
+    .. "uses green lawns, lavender-grey paths and Tower flowers. Legendary keeps "
+    .. "large Gothic paving matched to TOWER WALL color, Gothic lamps and its "
+    .. "garden treatment. Route 10's exit lawn is corrected in both modes. "
+    .. "Fuchsia follows CITY GROUND independently of GRASS.",
     full = true },
   { CommunityVisuals.grass,
     "Choose the original Overworld turf and encounter grass or TEST435's "
@@ -836,18 +843,26 @@ local SETTINGS = {
     .. "gameplay stats are untouched.",
     when = function() return stagedBattles() end, full = true },
   { PokeballSettings.enabled,
-    "Choose Battle Art's original capture animation or Legendary Visuals' "
-    .. "real 3D Poke Ball throw, intake beam, ground shakes, catch click and "
-    .. "breakout. This changes presentation only; items, odds and outcomes "
-    .. "remain Battle Art's.",
+    "EMBER LEGACY by Legend x Solo Dolo. "
+    .. "Choose Battle Art's original capture animation or Ember Legacy's "
+    .. "3D throws, capture effects, rebound, shakes and breakout. "
+    .. "Items, capture odds and outcomes remain Battle Art's.",
     when = function() return stagedBattles() end, full = true },
+  { PokeballSettings.audio,
+    "Ember Legacy by Legend x Solo Dolo. ORIGINAL keeps native audio; "
+    .. "EMBER LEGACY uses the supplied modern sounds; ANCIENT uses the "
+    .. "ancient ball variants. Music and Pokemon cries keep their own audio.",
+    when = function() return stagedBattles() and PokeballSettings.active() end, full = true },
+  { PokeballSettings.audioVolume,
+    "Ember Legacy effect volume, multiplied by the game's SFX volume.",
+    when = function() return stagedBattles() and PokeballSettings.active() end, full = true },
   { PokeballSettings.size,
-    "Scale the Legendary 3D capture ball without changing its trajectory.",
+    "Scale the Ember Legacy 3D capture ball without changing its trajectory.",
     when = function()
       return stagedBattles() and PokeballSettings.active()
     end, full = true },
   { PokeballSettings.suction,
-    "Enable the Legendary intake beam and suction presentation.",
+    "Enable the Ember Legacy intake beam and suction presentation.",
     when = function()
       return stagedBattles() and PokeballSettings.active()
     end, full = true },
@@ -865,12 +880,6 @@ local SETTINGS = {
     end, full = true },
   { PokeballSettings.streamers,
     "Set airborne trail strength for the CUSTOM capture profile.",
-    when = function()
-      return stagedBattles() and PokeballSettings.active()
-        and PokeballSettings.preset:get() == "CUSTOM"
-    end, full = true },
-  { PokeballSettings.stars,
-    "Set successful-catch star strength for the CUSTOM capture profile.",
     when = function()
       return stagedBattles() and PokeballSettings.active()
         and PokeballSettings.preset:get() == "CUSTOM"
@@ -1123,6 +1132,15 @@ local LEGENDARY_ROOT = {
 }
 
 local LEGENDARY_CATEGORIES = {
+  { id = "legendary_game_corner", label = "GAME CORNER", settings = {
+    CommunityVisuals.casino, CommunityVisuals.prizeRoom,
+  } },
+  { id = "legendary_lavender", label = "LAVENDER & CITIES", settings = {
+    CommunityVisuals.cityGround,
+  } },
+  { id = "legendary_interiors", label = "INTERIORS", settings = {
+    CommunityVisuals.tunnels, CommunityVisuals.rocket, CommunityVisuals.elevator,
+  } },
   { id = "legendary_tower", label = "POKEMON TOWER", settings = {
     CommunityVisuals.tower, CommunityVisuals.towerWall,
     TowerFogSettings.details, TowerFogSettings.enabled,
@@ -1140,7 +1158,7 @@ local LEGENDARY_CATEGORIES = {
     CommunityVisuals.signs, CommunityVisuals.cutTrees,
   } },
   { id = "legendary_nature", label = "GRASS & TREES", settings = {
-    CommunityVisuals.cityGround, CommunityVisuals.grass,
+    CommunityVisuals.grass,
     CommunityVisuals.trees, CommunityVisuals.treeDetail,
     CommunityVisuals.forest, ForestAtmos.setting,
   } },
@@ -1153,10 +1171,12 @@ local LEGENDARY_CATEGORIES = {
   } },
   { id = "legendary_battle", label = "BATTLE PRESENTATION", settings = {
     OverworldBattle.trainerBattleSetting,
-    PokeballSettings.enabled, PokeballSettings.size,
+  } },
+  { id = "ember_legacy", label = "EMBER LEGACY", settings = {
+    PokeballSettings.enabled, PokeballSettings.audio, PokeballSettings.audioVolume, PokeballSettings.size,
     PokeballSettings.suction, PokeballSettings.preset,
     PokeballSettings.beam, PokeballSettings.streamers,
-    PokeballSettings.stars, PokeballSettings.pokemonGlow,
+    PokeballSettings.pokemonGlow,
     PokeballSettings.suctionParticles, PokeballSettings.captureSpeed,
     PokeballSettings.openTime, PokeballSettings.fxScale,
   } },

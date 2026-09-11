@@ -77,6 +77,7 @@ local SHADER = [[
   varying float vFacadeBack;
   varying vec3 vSun;          // this fragment's place in the sun's view
   varying vec3 vModelSun;     // optional Stadium model-shadow view
+  varying LOVE_HIGHP_OR_MEDIUMP vec3 vFoliageRay;
   varying float vFog;         // distance/height haze from Viridian Forest
 #ifdef VOXEL_GRID
   // model space, one unit per voxel -- see VoxelGrid. Precision matters
@@ -106,6 +107,7 @@ local SHADER = [[
     vGrid = vertex_position.xyz;
 #endif
     vec4 w = model * vertex_position;
+    vFoliageRay = w.xyz - eye;
     weatherDistance = max(0.0, length(w.xyz-eye)-300.0);
     // All four vertices of a marked facade lie on one Z plane, so this is
     // constant across its fragments. Work it out here where `eye` belongs;
@@ -263,12 +265,55 @@ local SHADER = [[
   uniform vec3 fogColor;      // what the active map haze is made of
   uniform Image glassMask;    // opaque where the atlas texel is window glass
   uniform vec2 glassSize;     // the mask's dimensions: tc -> atlas texels
+  uniform float streetLampOn;
+  uniform vec3 streetLampA;
+  uniform vec3 streetLampB;
+  uniform vec3 streetLampC;
+  uniform vec3 streetLampD;
+  float streetPool(vec3 center) {
+    vec3 d=vFoliageRay-center;
+    float falloff=max(0.0,1.0-length(d.xz)/19.0);
+    return falloff*falloff*(1.0-smoothstep(0.5,5.0,abs(d.y)));
+  }
   uniform float glassNight;   // 0 = daylight .. 1 = the lamps are on
   uniform float glassPhase;   // the glint's phase: advances with TRAVEL
   uniform float glassGlint;   // and its strength: 0 while standing still
   uniform float glassOn;      // 0 for sprite-sheet draws (see Voxel3D.glass)
 
+  // BATTLE-FOLIAGE1: used only for explicitly scoped tree mesh draws.
+  uniform float foliageCutOn;
+  uniform vec3 foliageTargetA; // camera-relative, matching vFoliageRay
+  uniform vec3 foliageTargetB;
+  uniform float foliageRadius;
+  float foliageOpening(vec3 ray, vec3 target) {
+    float length2 = dot(target, target);
+    if (length2 < 1.0) return 0.0;
+    float t = dot(ray, target) / length2;
+    // Never cut scenery behind the subject, or behind the camera.
+    if (t <= 0.0 || t >= 1.0) return 0.0;
+    float width = 3.0 + foliageRadius * t;
+    float offAxis = length(ray - target * t) / width;
+    float edge = 1.0 - smoothstep(0.68, 1.0, offAxis);
+    return edge * (1.0 - smoothstep(0.88, 1.0, t));
+  }
+  float foliageThreshold(vec2 pixel) {
+    // Stable ordered coverage: only the soft rim is stippled. The centre
+    // is fully clear even through many overlapping leaf cards; no blend
+    // sorting or transparent geometry writing depth over the Pokemon.
+    vec2 p = mod(floor(pixel), 4.0);
+    vec2 lo = mod(p, 2.0);
+    vec2 hi = floor(p / 2.0);
+    float a = 2.0 * lo.x + 3.0 * lo.y - 4.0 * lo.x * lo.y;
+    float b = 2.0 * hi.x + 3.0 * hi.y - 4.0 * hi.x * hi.y;
+    return (4.0 * a + b + 0.5) / 16.0;
+  }
   vec4 effect(vec4 color, Image tex, vec2 tc, vec2 sc) {
+    if (foliageCutOn > 0.5) {
+      float opening = max(foliageOpening(vFoliageRay, foliageTargetA),
+                          foliageOpening(vFoliageRay, foliageTargetB));
+      if (opening > foliageThreshold(sc)) discard;
+    }
+
     // Enterable overworld buildings carry their south/front skin as a
     // one-sided surface. During a door transition the camera can briefly
     // stand north of that skin; discard its back instead of filling the
@@ -300,6 +345,11 @@ local SHADER = [[
     vec3 litRgb = p.rgb * vShade * sunlight(vSun)
                 * modelSunlight(vModelSun) * dayTint;
     vec3 rgb = litRgb;
+    if (streetLampOn > 0.001) {
+      float pool=min(1.0,streetPool(streetLampA)+streetPool(streetLampB)
+        +streetPool(streetLampC)+streetPool(streetLampD));
+      rgb += p.rgb * vec3(0.65,0.42,0.17) * pool * streetLampOn;
+    }
 #ifdef VOXEL_GRID
     // darken what is there rather than painting a colour, so a seam across
     // dark grass and one across a white roof each stay in their own palette
@@ -1059,6 +1109,14 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot, modelShadow, borrow
     pcall(sh.send, sh, "glassSize", { ok and mw or 1, ok and mh or 1 })
   end
   pcall(sh.send, sh, "glassNight", Voxel3D.glassNight or 0)
+  local lamps=Voxel3D.streetLamps
+  pcall(sh.send,sh,"streetLampOn",lamps and (Voxel3D.glassNight or 0) or 0)
+  if lamps then
+    for i,name in ipairs({"streetLampA","streetLampB","streetLampC","streetLampD"}) do
+      local p=lamps[i];local e=Voxel3D.eye or {0,0,0}
+      pcall(sh.send,sh,name,{p[1]-e[1],p[2]-e[2],p[3]-e[3]})
+    end
+  end
   pcall(sh.send, sh, "glassPhase", Voxel3D.glassPhase or 0)
   pcall(sh.send, sh, "glassGlint", Voxel3D.glassGlint or 0)
   -- on until a sprite pass says otherwise, reset per frame like `ghost`
@@ -1076,6 +1134,7 @@ function Voxel3D.beginScene(w, h, cx, cy, vw, vh, sky, slot, modelShadow, borrow
   Voxel3D.focusW = m[13] * cx + m[14] * 0 + m[15] * cy + m[16]
   sceneShader = sh
   activeShader = sh
+  pcall(sh.send, sh, "foliageCutOn", 0)
   active = true
   return true
 end
@@ -1501,6 +1560,34 @@ function Voxel3D.draw(mesh, texture, model, pull, sunModel)
   love.graphics.draw(mesh)
 end
 
+-- BattleScene owns this short-lived scope; overworld calls have no target.
+local battleFoliageTargets
+function Voxel3D.battleFoliage(arena, groundY)
+  battleFoliageTargets = nil
+  local eye = Voxel3D.eye
+  if not (arena and arena.player and arena.enemy and eye) then return end
+  local function relative(p)
+    return {p[1]-eye[1], (groundY or 0)+14-eye[2], p[2]-eye[3]}
+  end
+  battleFoliageTargets = {relative(arena.player), relative(arena.enemy)}
+end
+
+-- Trees only: stones, terrain, characters, balls and shadows use draw().
+-- Reset even when a draw fails so the cutaway cannot leak to later passes.
+function Voxel3D.drawFoliage(mesh, texture, model, pull, sunModel)
+  local targets, sh = battleFoliageTargets, activeShader
+  if not (targets and active and sh and mesh) then
+    return Voxel3D.draw(mesh, texture, model, pull, sunModel)
+  end
+  pcall(sh.send, sh, "foliageTargetA", targets[1])
+  pcall(sh.send, sh, "foliageTargetB", targets[2])
+  pcall(sh.send, sh, "foliageRadius", 26)
+  pcall(sh.send, sh, "foliageCutOn", 1)
+  local ok, err = pcall(Voxel3D.draw, mesh, texture, model, pull, sunModel)
+  pcall(sh.send, sh, "foliageCutOn", 0)
+  if not ok then error(err, 0) end
+end
+
 -- Override the hour tint for one tightly scoped draw, or restore the scene
 -- tint when called without an argument. Other lighting uniforms are untouched.
 function Voxel3D.dayTint(tint)
@@ -1666,6 +1753,9 @@ end
 
 -- End the pass and hand back the rendered canvas.
 function Voxel3D.endScene()
+  -- Map-local lamps are configured by the next world pass. Do not carry
+  -- Lavender lighting into a battle or a companion-owned scene.
+  Voxel3D.streetLamps = nil
   if not active then return nil end
   love.graphics.setShader()
   love.graphics.setDepthMode()

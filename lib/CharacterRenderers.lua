@@ -148,6 +148,14 @@ end
 
 -- First callback returning exactly true owns this object/pass.
 function CharacterRenderers.first(method, context)
+  -- Own live item rendering here as well as in VoxelScene: companion mods
+  -- can rebuild the scene loops while preserving this public renderer bridge.
+  if method=='drawEntity' or method=='drawReflection' or method=='drawShadow' then
+    local Items=V.require('ItemPokeballs')
+    if Items.accepts(context) then
+      return Items.draw(context,method=='drawShadow' and V.require('ShadowMap') or nil)
+    end
+  end
   discoverExports()
   if not CALLBACKS[method] then return false end
   for _, entry in ipairs(CharacterRenderers.entries) do

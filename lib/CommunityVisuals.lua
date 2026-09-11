@@ -132,7 +132,25 @@ CommunityVisuals.forest = ModSetting.new(
   { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }
 )
 
+-- Keep Battle Art on first use; saved Legendary choices remain authoritative.
+CommunityVisuals.casino = ModSetting.new("communityCasino", "CASINO",
+  { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }, 1)
+CommunityVisuals.prizeRoom = ModSetting.new("communityPrizeRoom", "PRIZE ROOM",
+  { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }, 1)
+CommunityVisuals.tunnels = ModSetting.new("communityTunnels", "TUNNELS",
+  { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }, 1)
+CommunityVisuals.rocket = ModSetting.new("communityRocket", "ROCKET HIDEOUT",
+  { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }, 1)
+CommunityVisuals.elevator = ModSetting.new("communityElevator", "ROCKET ELEVATOR",
+  { "default", "n64memory" }, { "BATTLE ART", "LEGENDARY VISUALS" }, 1)
+
 CommunityVisuals.settings = {
+  CommunityVisuals.casino,
+  CommunityVisuals.prizeRoom,
+  CommunityVisuals.tunnels,
+  CommunityVisuals.rocket,
+  CommunityVisuals.elevator,
+
   CommunityVisuals.pillars,
   CommunityVisuals.masonry,
   CommunityVisuals.tower,
@@ -266,6 +284,7 @@ end
 -- mesh.  Drop only derived runtime geometry; map data, collision and disk
 -- cache files remain untouched and rebuild through Battle Art's normal queue.
 function CommunityVisuals.invalidate()
+  pcall(function() V.require("GameCorner").invalidate() end)
   _G.__bav_granite_pillars = nil
   _G.__bav_granite_pillar_base = nil
   _G.__ds_round_cells = nil

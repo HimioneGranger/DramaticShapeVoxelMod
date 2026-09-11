@@ -84,6 +84,9 @@ local modules = {
 local C = assert(loadfile('lib/ChunkMesher.lua'))({
   require = function(name) return assert(modules[name], name) end,
 })
+modules.TowerGarden = assert(loadfile('lib/TowerGarden.lua'))({
+  require = function() return Community end,
+})
 
 local function key(x, z) return (z + 64) * 4096 + x + 64 end
 local function fixture(id, tile, claimed, tileY, mapHeight, towerLandscape,
@@ -172,9 +175,9 @@ local lavenderLegendaryPath57, lavenderLegendaryPath57N = signature('LAVENDER_TO
 check(lavenderLegendaryN == lavenderN and same(lavenderLegendary, lavenderBattle)
     and same(lavenderLegendary, palletGrass),
   'Both Lavender CITY GROUND modes use the current shared natural turf geometry')
-check(lavenderLegendaryPath35N == lavenderLegendaryPath57N
-    and same(lavenderLegendaryPath35, lavenderLegendaryPath57),
-  'Lavender Legendary preserves the $23/$39 authored path network as one material')
+check(lavenderLegendaryPath57N == lavenderLegendaryN
+    and same(lavenderLegendaryPath57, lavenderLegendary),
+  'Legendary outer map margin keeps turf instead of interior plaza paving')
 check(lavenderLegendaryPath35N == lavenderLegendaryN
     and not same(lavenderLegendaryPath35, lavenderLegendary),
   'Lavender Legendary paths stay visibly distinct from the surrounding ground')
@@ -213,9 +216,10 @@ local signGrass, signGrassN = signature(
   'PALLET_TOWN', false, true, 44, false, 6, 9, false, false, 18, 10)
 local signPath, signPathN = signature(
   'LAVENDER_TOWN', false, false, 57, false, 6, 9, false, false, 18, 10)
-check(signBattleN == signLegendaryN and signBattleN == signGrassN
-    and same(signBattle, signLegendary) and same(signBattle, signGrass),
-  'Lavender cell (9,3) fills its claimed sign floor with the same plain grass in both modes')
+check(signBattleN == signGrassN and same(signBattle, signGrass),
+  'Battle Art retains the approved grass under the Lavender sign')
+check(signLegendaryN > signBattleN and not same(signLegendary, signBattle),
+  'Legendary claimed plaza floor receives the new slab geometry')
 check(signPathN == signBattleN and not same(signPath, signBattle),
   'Lavender cell (9,3) grass remains distinct from the adjacent authored checker/path material')
 
@@ -308,8 +312,8 @@ check(lavenderCache ~= fingerprint('LAVENDER_TOWN', true, false),
 check(lavenderCache:find('lavender-battle-parity-v5', 1, true) ~= nil,
   'Lavender body cache invalidates the pre-parity sandy Battle Art mesh')
 local route10Cache = fingerprint('ROUTE_10', false, false)
-check(route10Cache == fingerprint('ROUTE_10', true, false),
-  'Route 10 is not a CITY GROUND cache dependency')
+check(route10Cache ~= fingerprint('ROUTE_10', true, false),
+  'Route 10 garden geometry now keys on CITY GROUND')
 check(route10Cache ~= fingerprint('ROUTE_10', false, true),
   'Route 10 interior terrain remains a global GRASS cache dependency')
 check(route10Cache:find('route10-lavender-approach-v3-exit-lawn', 1, true) ~= nil,
@@ -329,6 +333,7 @@ check(palletCache ~= fingerprint('PALLET_TOWN', false, true),
 local TerrainAtlas = assert(loadfile('lib/TerrainAtlas.lua'))({
   require = function(name)
     if name == 'CommunityVisuals' then return Community end
+    if name == 'TowerGarden' then return modules.TowerGarden end
     return {}
   end,
 })
@@ -422,8 +427,13 @@ local lavenderBattleAtlas = material('LAVENDER_TOWN', false, false)
 local lavenderLegendaryAtlas = material('LAVENDER_TOWN', true, false)
 local br, bg, bb = lavenderBattleAtlas:getPixel(9 * 8, 3 * 8) -- $39 path donor
 local lrPath, lgPath, lbPath = lavenderLegendaryAtlas:getPixel(9 * 8, 3 * 8)
-check(br == lrPath and bg == lgPath and bb == lbPath,
-  'Battle Art Lavender uses the exact current Legendary path palette')
+check(br ~= lrPath or bg ~= lgPath or bb ~= lbPath,
+  'Legendary lawn donor stays separate from Battle Art Lavender path')
+local pbr, pbg, pbb = lavenderBattleAtlas:getPixel(3 * 8, 2 * 8)
+local plr, plg, plb = lavenderLegendaryAtlas:getPixel(3 * 8, 2 * 8)
+check(br == pbr and bg == pbg and bb == pbb
+    and pbr == plr and pbg == plg and pbb == plb,
+  'Battle Art retains its path palette and Legendary retains the authored path donor')
 local rr, rg, rb = lavenderBattleAtlas:getPixel(8, 0)
 check(rr == .1 and rg == .8 and rb == .1, 'Lavender material paint leaves unrelated roof pixels intact')
 local routeGrass = material('ROUTE_10', false, true)
@@ -434,9 +444,10 @@ check(bright > ordinary, 'Route 10 grass is visibly brighter without changing ot
 local lr, lg, lb = lavenderLegendaryAtlas:getPixel(12 * 8, 2 * 8)
 local brg, bgg, bbg = lavenderBattleAtlas:getPixel(12 * 8, 2 * 8)
 local rr10, rg10, rb10 = routeGrass:getPixel(12 * 8, 2 * 8)
-check(lr == rr10 and lg == rg10 and lb == rb10
-    and brg == lr and bgg == lg and bbg == lb,
-  'Both Lavender modes use the exact same bright-green palette as Route 10')
+check(brg == rr10 and bgg == rg10 and bbg == rb10,
+  'Battle Art Lavender retains the bright-green Route 10 palette')
+check(lr ~= brg or lg ~= bgg or lb ~= bbg,
+  'Legendary Lavender uses its separate lawn palette')
 check(routeGrass ~= ordinaryGrass, 'Route 10 static atlas cannot leak its palette into ordinary routes')
 local route10Animated = TerrainAtlas.animate(animatedMap('ROUTE_10'), nil, {}, false)
 check(route10Animated ~= routeShared, 'Route 10 animated atlas is isolated from other routes')

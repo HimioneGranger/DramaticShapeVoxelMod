@@ -6,8 +6,13 @@ local P = {}
 -- Battle Art remains the first-run/default presentation. LEGENDARY replaces
 -- only the capture prop and its 2D ball-bearing overlays; battle rules stay
 -- entirely with the engine.
-P.enabled = ModSetting.new("legendaryPokeballs", "LEGENDARY POKEBALL SYSTEM",
-  {false,true},{"BATTLE ART","LEGENDARY"}, 1)
+P.enabled = ModSetting.new("legendaryPokeballs", "EMBER LEGACY",
+  {false,true},{"BATTLE ART","EMBER LEGACY"}, 1)
+
+P.audio = ModSetting.new("emberLegacyAudio", "EMBER LEGACY AUDIO",
+  {"ORIGINAL","EMBER","ANCIENT"},{"ORIGINAL","EMBER LEGACY","ANCIENT"}, 2)
+P.audioVolume = ModSetting.new("emberLegacyVolume", "EMBER LEGACY VOLUME",
+  {0,0.25,0.50,0.75,1.00},{"OFF","25%","50%","75%","100%"}, 4)
 
 P.size = ModSetting.new("pokeballSize","BALL SIZE",
   {0.35,0.50,0.65,0.80,0.85,0.90,0.95,1.00,1.05,1.10,1.15,1.20,1.25,1.30,1.35,1.40},
