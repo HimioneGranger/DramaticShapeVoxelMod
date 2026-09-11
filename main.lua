@@ -738,11 +738,12 @@ local SETTINGS = {
     .. "Kanto wayfinder with live location labels, including Viridian Forest.",
     full = true },
   { CommunityVisuals.cityGround,
-    "Choose Battle Art city ground or Legendary Visuals' city treatment. In "
-    .. "Lavender, Battle Art preserves the authored path network with the same "
-    .. "textured road family used by the Route 8/12 approaches; Legendary uses "
-    .. "the separate haunted lavender ground treatment. This is independent of "
-    .. "GRASS, so route and encounter turf can be changed separately.",
+    "Choose Battle Art city ground or Legendary Visuals' city treatment. "
+    .. "Lavender Battle Art now keeps the currently approved Legendary look as "
+    .. "its baseline: vivid green lawn, lavender-grey authored paths, and the "
+    .. "existing Tower flower landscaping. Legendary currently matches it but "
+    .. "remains separately selectable so a future Legendary revision can diverge. "
+    .. "Fuchsia still follows this switch independently of GRASS.",
     full = true },
   { CommunityVisuals.grass,
     "Choose the original Overworld turf and encounter grass or TEST435's "
@@ -2088,7 +2089,7 @@ mod.hooks:wrap("world.tod", function(next, tod, ctx)
   return DayNight.tod()
 end)
 
-mod.exports.version = "1.10.7"
+mod.exports.version = "1.10.6"
 mod.exports.battlePresentation = BattlePresentation.export()
 mod.exports.battleStage = BattleStage.export(OverworldBattle)
 mod.exports.voxel_companion = Companion.provider

@@ -56,9 +56,78 @@ local Structures = assert(loadfile('lib/Structures.lua'))({
     if name == 'CommunityVisuals' then
       return { customGrass = function() return grassMode end }
     end
+    if name == 'VoxelVisualObjects' then
+      return { id = function() return 'lavender-sign' end }
+    end
     return {}
   end,
 })
+
+-- The screenshot's bald 16x16 square is not the Route 10 Tower claim above.
+-- It is Lavender's Silph Scope sign at engine cell (9,3), source tiles
+-- tx18..19 / ty6..7. Exercise the production object-ground vote with the exact
+-- surrounding donors from the canonical map: five $30 non-path neighbours and
+-- one $39 path neighbour. The sign must synthesize $30 beneath all four claimed
+-- billboard tiles; ChunkMesher's Lavender parity test then proves that donor
+-- renders as plain grass in both modes.
+do
+  local signS = {
+    outdoor = true, objectQuads = {}, shapeAt = {}, tileAt = {},
+    skip = {}, ground = {},
+  }
+  local signTiles = {
+    {18, 6, 70}, {19, 6, 71}, {18, 7, 86}, {19, 7, 87},
+  }
+  for _, c in ipairs(signTiles) do
+    local k = key(c[1], c[2])
+    signS.shapeAt[k] = { class = 'signpost', art = 'billboard', authored = true, h = 16 }
+    signS.tileAt[k] = c[3]
+  end
+  local function flat(x, z, tile)
+    local k = key(x, z)
+    signS.shapeAt[k] = { class = 'ground', art = 'flat', flat = true, h = 0 }
+    signS.tileAt[k] = tile
+  end
+  flat(18, 5, 48); flat(19, 5, 48)
+  flat(18, 8, 48); flat(19, 8, 57)
+  flat(17, 6, 48); flat(17, 7, 48)
+  for _, z in ipairs({6, 7}) do
+    local k = key(20, z)
+    signS.shapeAt[k] = { class = 'wall', art = 'upright', flat = false, h = 16 }
+    signS.tileAt[k] = 39
+  end
+
+  local region = { minX = 18, maxX = 19, minY = 6, maxY = 7, tiles = {} }
+  local cluster = { minX = 18, maxX = 19, minY = 6, maxY = 7, tiles = {} }
+  for _, c in ipairs(signTiles) do
+    region.tiles[#region.tiles + 1] = { c[1], c[2] }
+    cluster.tiles[#cluster.tiles + 1] = { c[1], c[2] }
+  end
+  local W = 18 -- 16px drawing plus the flood border used by extractObjects
+  local state, flooded, srcU, srcV = {}, {}, {}, {}
+  for py = 0, 15 do
+    for px = 0, 15 do
+      local i = (py + 1) * W + (px + 1)
+      state[i] = 'solid'
+      srcU[i], srcV[i] = 0, 0
+    end
+  end
+  local signMap = {
+    id = 'LAVENDER_TOWN',
+    tileset = { imageWidth = 128, imageHeight = 48 },
+    isWalkableCell = function() return false end,
+  }
+  check(Structures.buildObject(signS, signMap, region, cluster,
+    state, flooded, srcU, srcV, W, true),
+    'Lavender Silph Scope sign builds as the claimed billboard target')
+  for _, c in ipairs(signTiles) do
+    local k = key(c[1], c[2])
+    eq(signS.ground[k], 48,
+      'Lavender Silph Scope sign synthesizes the canonical non-path $30 floor')
+    eq(signS.tileAt[k], c[3],
+      'Lavender Silph Scope sign never rewrites its source tile art')
+  end
+end
 
 local pixels = {}
 function pixels:getPixel()

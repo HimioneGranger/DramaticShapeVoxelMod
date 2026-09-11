@@ -570,6 +570,7 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
   local legendaryCityGround = cityGroundMap and CommunityVisuals.customCityGround()
   local lavenderGround = tileset.id == "OVERWORLD" and mapId == "LAVENDER_TOWN"
   local lavenderLegendaryGround = lavenderGround and legendaryCityGround
+  local lavenderBattleCurrentGround = lavenderGround and not legendaryCityGround
   local fuchsiaGround = legendaryCityGround and mapId == "FUCHSIA_CITY"
   local customGrass = CommunityVisuals.customGrass() and not cityGroundMap
   local grassReplacement = customGrass or fuchsiaGround
@@ -1730,20 +1731,6 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
     return KANTO_PATH_TILE[tile] == true
   end
 
-  -- Battle Art Lavender uses the same textured road donor as the three exits,
-  -- but the non-path town floor is slightly darker. This keeps the original
-  -- path network legible without reintroducing bright green turf or a flat
-  -- single-colour sheet.
-  local function lavenderBattleGroundTop(tx, ty, x0, z0, h, shade)
-    local x1, z1 = x0 + 8, z0 + 8
-    local variant = math.floor(rockNoise(tx, ty, 1123) * 4)
-    local broad = 0.855 + smoothPathNoise(x0 * 0.52, z0 * 0.52, 1129) * 0.055
-    push({ { x0, h, z0 }, { x1, h, z0 },
-           { x1, h, z1 }, { x0, h, z1 } },
-         pavedUV(KANTO_PATH_SWATCH_TILE, variant),
-         shadeTimes(aoShades(tx, ty, h, shade), broad))
-  end
-
   local function woodRect(axis, across0, across1, along0, along1, y)
     if axis == "z" then
       return { { across0, y, along0 }, { across1, y, along0 },
@@ -2534,12 +2521,14 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
               kantoPavedTop(tx, ty, tx * 8, ty * 8, 0,
                             aoShades(tx, ty, 0, 1))
             elseif lavenderLegendaryGround then
-              -- Legendary Lavender uses the same vivid lawn geometry as the
-              -- approved bright Route 10 grass instead of mauve city earth.
               kantoGrassTop(tx, ty, tx * 8, ty * 8, 0,
                             aoShades(tx, ty, 0, 1))
-            else
-              lavenderBattleGroundTop(tx, ty, tx * 8, ty * 8, 0, 1)
+            elseif lavenderBattleCurrentGround then
+              -- Battle Art snapshots the CURRENT approved Legendary lawn, but
+              -- keeps its own branch so a future Legendary revision can change
+              -- without taking this baseline away.
+              kantoGrassTop(tx, ty, tx * 8, ty * 8, 0,
+                            aoShades(tx, ty, 0, 1))
             end
           elseif isKantoCourtyardAt(tx, ty, g) then
             kantoCourtyardTop(tx, ty, tx * 8, ty * 8, 0,
@@ -2731,8 +2720,9 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
             elseif lavenderLegendaryGround then
               kantoGrassTop(tx, ty, x0, z0, h,
                             aoShades(tx, ty, h, 1))
-            else
-              lavenderBattleGroundTop(tx, ty, x0, z0, h, 1)
+            elseif lavenderBattleCurrentGround then
+              kantoGrassTop(tx, ty, x0, z0, h,
+                            aoShades(tx, ty, h, 1))
             end
           elseif isKantoCourtyardAt(tx, ty) and s.flat then
             kantoCourtyardTop(tx, ty, x0, z0, h,

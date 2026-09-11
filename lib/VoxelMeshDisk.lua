@@ -553,7 +553,10 @@ function Disk.fingerprint(map, slot, masks, kind)
     parts[#parts + 1] = "city-ground-option-v4"
     parts[#parts + 1] = CommunityVisuals.cityGround:get()
     if mapId == "LAVENDER_TOWN" then
-      parts[#parts + 1] = "lavender-bright-lawn-v4"
+      -- Battle Art now snapshots the current Legendary Lavender lawn/path
+      -- treatment too. Invalidate the prior default-mode sandy city body so
+      -- an old persistent mesh cannot make the parity fix appear to do nothing.
+      parts[#parts + 1] = "lavender-battle-parity-v5"
     end
   end
   if mapId:match("^POKEMON_TOWER_[1-7]F$") then

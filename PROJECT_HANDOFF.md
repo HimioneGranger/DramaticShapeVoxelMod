@@ -1,38 +1,33 @@
-# 1.10.7 test identity after same-version QA ambiguity - 2026-09-10
+# Lavender Battle Art parity + exact bald-square fix - 2026-09-10
 
-The first in-engine retest after `43d7922` was reported as visually identical
-to tag `1.10.6`. The branch was still advertising `1.10.6` in both
-`manifest.json` and `mod.exports.version`, so a locally packaged build also had
-the exact same mod/version identity as the installed tagged build. Gen1Recomp's
-manual ZIP import rejects an already-installed same-id mod unless the caller is
-using its explicit replacement/update path, making that test ambiguous even
-though the branch source differed substantially from the tag.
+The previous follow-up targeted the wrong rectangle. The large 12x12
+`pokemon_tower_top` claim on ROUTE_10 is the already-approved flower square and
+must remain exactly as it is. The screenshot's grey/bald square is instead on
+LAVENDER_TOWN: it is the synthesized floor beneath the Silph Scope sign at
+engine cell `(9,3)` (source tiles `tx18..19`, `ty6..7`). The sign art stands up
+as a billboard and claims those four source tiles, so the mesher has to choose
+their replacement floor explicitly.
 
-The post-tag test build is now versioned `1.10.7` in both version surfaces so
-the package filename/install UI and runtime export make it unambiguous which
-code is actually running. This version bump does not change the Lavender
-geometry itself; it exists so the Tower lawn/flowerbed fix can be visually
-validated before making any further coordinate/material changes.
+Battle Art Lavender now snapshots the CURRENT Legendary Lavender city treatment:
+non-path ground uses the same vivid Route 10 green lawn geometry/material,
+authored `$23/$39` path cells use the same lavender-grey path palette, and the
+existing Tower flower landscaping is unchanged. That makes the claimed sign
+floor at `(9,3)` plain non-checkered grass in both modes while preserving the
+checker/path network beside it. The CITY GROUND modes remain separately keyed so
+a future Legendary revision can diverge without taking this approved Battle Art
+baseline away. Fuchsia is unchanged.
+
+The earlier unsolicited `1.10.7` version bump was reverted: `manifest.json` and
+`mod.exports.version` remain `1.10.6`. No tags are moved or created by this work.
+No source map tiles, collision, walkability, warps, encounters, or Tower
+flowerbed density/placement are changed.
 
 # Lavender Tower lawn + Battle Art flowerbed - 2026-09-10
 
-User-approved follow-up: keep the existing large Pokemon Tower flower square and
-its current grass colour exactly as-is, but make that Lavender landscaping a
-Battle Art baseline rather than a Legendary-only feature. The Route 10
-`pokemon_tower_top` claim footprint now always paints exposed claimed floor with
-the map's current grass donor, including donorless claimed cells that could
-otherwise expose the neutral grey world underlay. This is the intended bald-
-square fix, but the first in-engine retest was ambiguous because it still carried
-the same `1.10.6` package identity as the tagged build; validate it again using
-the distinct `1.10.7` package before changing coordinates or materials further.
-
-The flower standees keep the same blocked-cell checkerboard, density and
-collision checks; the only semantic change is that Battle Art now emits the same
-approved flowerbed as Legendary. Legendary remains visually unchanged today and
-can be replaced independently later. No source tiles, collision, walkability,
-warps or encounters change. Route 10 cache revisions are now
-`route10-lavender-approach-v2-tower-lawn` and
-`route10-tower-flowerbed-v2-baseline`.
+Historical note: `43d7922` made the existing Route 10 Tower flower landscaping
+available in Battle Art too. That change is retained because the user wants the
+large flower square exactly as it is, but it was NOT the grey-square fix. The
+grey square is the Lavender Town sign-floor claim described above.
 
 # Lavender approach ground + Tower flowerbed - 2026-09-10
 
@@ -44,11 +39,10 @@ while LEGENDARY GRASS routes the same coverage through the approved bright
 Route 10 lawn. ROADS & BRIDGES can still retain its authored path material when
 enabled, and CITY GROUND still has no ownership over Route 10.
 
-Lavender CITY GROUND LEGENDARY now uses that same bright-green lawn palette for
-non-path town ground while preserving the authored $23/$39 path network.
-Fuchsia is unchanged. BATTLE ART Lavender still paints its sandy $23/$39 atlas
-donors even when ROADS is disabled and keeps the slightly darker sandy town
-ground treatment already approved by the preceding path-network change.
+This section describes the earlier `5e1d267` state. The current parity patch at
+the top of this file supersedes Lavender's mode split: Battle Art now keeps the
+same current bright lawn and lavender-grey `$23/$39` path palette as Legendary.
+Fuchsia remains unchanged.
 
 The flowerbed does not use guessed camera coordinates. `pokemon_tower_top` is
 already the claim-only 12x12 tile rectangle on Route 10 that contains the upper
@@ -59,10 +53,10 @@ Legendary. No source map tile, collision, warp, encounter or walkability data is
 changed.
 
 Persistent cache identities now use `route10-lavender-approach-v2-tower-lawn`,
-`route10-tower-flowerbed-v2-baseline` (AUX), and `lavender-bright-lawn-v4`. Static and
+`route10-tower-flowerbed-v2-baseline` (AUX), and `lavender-battle-parity-v5`. Static and
 animated atlas map isolation remains unchanged. Headless validation: CITY
-GROUND/Route 10 suite 46 checks, dedicated Lavender approach/flowerbed suite
-207 checks, grass east-edge 15 checks, build-budget 35 checks, and voxel-storage
+GROUND/Route 10 suite 50 checks, dedicated Lavender approach/flowerbed suite
+216 checks, grass east-edge 15 checks, build-budget 35 checks, and voxel-storage
 6 checks. All 114 production Lua files compile under Lupa's LuaJIT 2.1 backend.
 Actual in-engine visual comparison is still required before release.
 
@@ -80,13 +74,18 @@ All 114 production Lua files compile under that backend after the refactor.
 
 # Lavender authored path-network correction - 2026-09-10
 
-Lavender CITY GROUND now preserves the original `$23/$39` path network visible in the source map instead of flattening every walkable cell to one material. `BATTLE ART` uses the same textured Kanto road donor/treatment as the Route 8, Route 12 and Rock Tunnel approaches for path cells, with the surrounding town floor using the same texture family at a slightly darker broad tone; there is no bright green lawn or flat bright sheet. `LEGENDARY VISUALS` keeps the exact same authored path topology but separates it into a lighter misty lavender-grey road over a lighter dusty mauve/blue-grey earth field, with sparse texture and low-frequency variation rather than the former near-black carpet. Alternate flat donors and synthesized floors beneath signs/buildings follow their source ground/path membership so bald squares do not return. Route 10 is no longer repainted by CITY GROUND at all; Lavender now matches the existing route/cave-exit logic instead of modifying its neighbour. Fuchsia, map data, collision, buildings and non-ground geometry are unchanged. Cache identities invalidate the previous flattened-ground experiments.
+Historical pre-parity state: Lavender CITY GROUND first preserved the original
+`$23/$39` path network instead of flattening every walkable cell to one
+material, but Battle Art still used a sandy family while Legendary used its
+lavender-grey/green treatment. The current top-of-file parity patch supersedes
+that material split while keeping the authored topology. Route 10 remains
+outside CITY GROUND ownership; Fuchsia, map data, collision, buildings and
+non-ground geometry remain unchanged.
 # Release 1.10.6 - performance profiler producer API
 
-Tag `1.10.6` is the published producer-API baseline. The post-tag
-`feature/performance-profiler-v2` test build is now versioned `1.10.7` in both
-`manifest.json` and `mod.exports.version` so local Lavender QA cannot be mistaken
-for the already-installed `1.10.6` package.
+Tag `1.10.6` is the published producer-API baseline. The branch continues to
+advertise `1.10.6`; do not move/create a tag or bump the version unless the user
+explicitly requests it.
 
 # Performance monitor producer API - 2026-09-10
 

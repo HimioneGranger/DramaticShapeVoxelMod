@@ -693,16 +693,17 @@ local function applyCaveCommunityMaterials(map, total, paint, recolor)
 end
 
 local function applyLavenderCommunityMaterials(paint, legendary)
-  if not legendary then
-    -- The mesher always samples $39 for Battle Art ground, even with ROADS
-    -- disabled. Own that donor here instead of inheriting the city's palette.
-    paint(35, PATH_ART, PATH)
-    paint(57, PATH_ART, PATH)
+  if legendary then
+    -- Keep this as an explicit mode branch even though it matches Battle Art
+    -- today: the Legendary author can revise this side later without changing
+    -- the Battle Art baseline captured below.
+    paint(35, PATH_ART, LAVENDER_PATH)
+    paint(44, GRASS_ART, ROUTE10_GRASS)
+    paint(57, PATH_ART, LAVENDER_PATH)
     return
   end
-  -- Preserve Lavender's source path network instead of collapsing the entire
-  -- town to one material. $23/$39 remain a misty lavender-grey road while
-  -- surrounding ground uses the same vivid green family as Route 10.
+  -- Battle Art deliberately snapshots the CURRENT approved Legendary
+  -- Lavender treatment: same lavender-grey paths and vivid green lawn.
   paint(35, PATH_ART, LAVENDER_PATH)
   paint(44, GRASS_ART, ROUTE10_GRASS)
   paint(57, PATH_ART, LAVENDER_PATH)
