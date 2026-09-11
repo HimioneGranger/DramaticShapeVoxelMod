@@ -80,23 +80,33 @@ local map = {
     return cx == 5 and cy == 10
   end,
 }
-local bed = {
-  lavenderFlowerbed = { minX = 10, maxX = 21, minY = 20, maxY = 27 },
-  flowerQuads = {},
-}
-eq(Structures.buildLavenderFlowerbed(bed, map, pixels), 0,
-  'Battle Art GRASS does not add Legendary flowerbed standees')
-eq(#bed.flowerQuads, 0, 'Battle Art keeps the claim-only rectangle undecorated')
+local function flowerbedFixture()
+  return {
+    lavenderFlowerbed = { minX = 10, maxX = 21, minY = 20, maxY = 27 },
+    flowerQuads = {},
+  }
+end
 
-grassMode = true
-local emitted = Structures.buildLavenderFlowerbed(bed, map, pixels)
-check(emitted > 0 and #bed.flowerQuads == emitted,
-  'Legendary GRASS emits flower standees inside the Tower rectangle')
+local battleBed = flowerbedFixture()
+local battleEmitted = Structures.buildLavenderFlowerbed(battleBed, map, pixels)
+check(battleEmitted > 0 and #battleBed.flowerQuads == battleEmitted,
+  'Battle Art keeps the approved Lavender flowerbed standees')
 eq(blockedCalls, 12 * 8,
-  'every candidate tile checks the engine collision cell before decoration')
+  'Battle Art flowerbed checks every candidate collision cell')
 -- 48 checkerboard positions minus the two even-parity 8px tiles in the one
 -- walkable 16px collision cell; the fully-dark template emits 17 quads each.
-eq(emitted, 46 * 17,
-  'flowerbed fills the blocked checkerboard while preserving the walking cell')
+eq(battleEmitted, 46 * 17,
+  'Battle Art flowerbed preserves the existing blocked checkerboard exactly')
+
+grassMode = true
+blockedCalls = 0
+local legendaryBed = flowerbedFixture()
+local legendaryEmitted = Structures.buildLavenderFlowerbed(legendaryBed, map, pixels)
+check(legendaryEmitted > 0 and #legendaryBed.flowerQuads == legendaryEmitted,
+  'Legendary keeps the same approved Lavender flowerbed geometry')
+eq(blockedCalls, 12 * 8,
+  'Legendary flowerbed checks every candidate collision cell')
+eq(legendaryEmitted, battleEmitted,
+  'Battle Art and Legendary flowerbed density remain identical')
 
 print(checks .. ' checks passed (Lavender approach visuals)')

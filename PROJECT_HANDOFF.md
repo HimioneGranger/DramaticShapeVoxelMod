@@ -1,3 +1,21 @@
+# Lavender Tower lawn + Battle Art flowerbed - 2026-09-10
+
+User-approved follow-up: keep the existing large Pokemon Tower flower square and
+its current grass colour exactly as-is, but make that Lavender landscaping a
+Battle Art baseline rather than a Legendary-only feature. The Route 10
+`pokemon_tower_top` claim footprint now always paints exposed claimed floor with
+the map's current grass donor, including donorless claimed cells that previously
+showed the neutral grey world underlay. This fixes the bald grey square without
+changing the broader cave-to-Lavender approach treatment.
+
+The flower standees keep the same blocked-cell checkerboard, density and
+collision checks; the only semantic change is that Battle Art now emits the same
+approved flowerbed as Legendary. Legendary remains visually unchanged today and
+can be replaced independently later. No source tiles, collision, walkability,
+warps or encounters change. Route 10 cache revisions are now
+`route10-lavender-approach-v2-tower-lawn` and
+`route10-tower-flowerbed-v2-baseline`.
+
 # Lavender approach ground + Tower flowerbed - 2026-09-10
 
 The previously pending screenshot request is now implemented. On ROUTE_10 the
@@ -17,12 +35,13 @@ ground treatment already approved by the preceding path-network change.
 The flowerbed does not use guessed camera coordinates. `pokemon_tower_top` is
 already the claim-only 12x8 tile rectangle on Route 10 that contains the upper
 half of Pokemon Tower's source drawing; Buildings now records that exact matched
-footprint. LEGENDARY GRASS adds animated flower standees on a checkerboard of
-the unwalkable cells inside it. BATTLE ART adds none. No source map tile,
-collision, warp, encounter or walkability data is changed.
+footprint. The follow-up Tower-lawn patch makes those animated flower standees
+a Battle Art baseline too, while preserving the exact checkerboard/density in
+Legendary. No source map tile, collision, warp, encounter or walkability data is
+changed.
 
-Persistent cache identities advance with `route10-lavender-approach-v1`,
-`route10-tower-flowerbed-v1` (AUX), and `lavender-bright-lawn-v4`. Static and
+Persistent cache identities now use `route10-lavender-approach-v2-tower-lawn`,
+`route10-tower-flowerbed-v2-baseline` (AUX), and `lavender-bright-lawn-v4`. Static and
 animated atlas map isolation remains unchanged. Headless validation: CITY
 GROUND/Route 10 suite 45 checks, dedicated Lavender approach/flowerbed suite
 150 checks, grass east-edge 15 checks, build-budget 35 checks, and voxel-storage

@@ -86,7 +86,7 @@ local C = assert(loadfile('lib/ChunkMesher.lua'))({
 })
 
 local function key(x, z) return (z + 64) * 4096 + x + 64 end
-local function fixture(id, tile, claimed, tileY, mapHeight)
+local function fixture(id, tile, claimed, tileY, mapHeight, towerLandscape)
   tile = tile or 44
   tileY = tileY or 1
   mapHeight = mapHeight or 1
@@ -98,7 +98,12 @@ local function fixture(id, tile, claimed, tileY, mapHeight)
   analysis.tileAt[key(1, tileY)] = tile
   if claimed then
     analysis.skip[key(1, tileY)] = true
-    analysis.ground[key(1, tileY)] = tile
+    analysis.ground[key(1, tileY)] = towerLandscape and false or tile
+  end
+  if towerLandscape then
+    analysis.lavenderFlowerbed = {
+      minX = 1, maxX = 1, minY = tileY, maxY = tileY,
+    }
   end
   return {
     id = id,
@@ -108,11 +113,11 @@ local function fixture(id, tile, claimed, tileY, mapHeight)
   }
 end
 
-local function signature(id, city, grass, tile, claimed, tileY, mapHeight, roads)
+local function signature(id, city, grass, tile, claimed, tileY, mapHeight, roads, towerLandscape)
   Community.cityGround.value = city and 'n64memory' or 'default'
   Community.grass.value = grass and 'n64memory' or 'default'
   Community.roads.value = roads and 'n64memory' or 'default'
-  local vertices = C.geometry(fixture(id, tile, claimed, tileY, mapHeight), true)
+  local vertices = C.geometry(fixture(id, tile, claimed, tileY, mapHeight, towerLandscape), true)
   local out = {}
   for _, vertex in ipairs(vertices) do
     -- Geometry positions/topology must stay fixed; only UV/material shading is
@@ -208,6 +213,18 @@ check(route10CityToggleN == route10BattleApproachN
     and same(route10CityToggle, route10BattleApproach),
   'Route 10 approach remains independent of the CITY GROUND setting')
 
+local route10BattleTowerLawn, route10BattleTowerLawnN = signature(
+  'ROUTE_10', false, false, 90, true, 132, 36, false, true)
+local route10LegendaryTowerLawn, route10LegendaryTowerLawnN = signature(
+  'ROUTE_10', false, true, 90, true, 132, 36, false, true)
+local route10ReferenceLawn, route10ReferenceLawnN = signature(
+  'ROUTE_10', false, true, 44, false, 132, 36)
+check(route10BattleTowerLawnN == route10ReferenceLawnN
+    and route10LegendaryTowerLawnN == route10ReferenceLawnN
+    and same(route10BattleTowerLawn, route10LegendaryTowerLawn)
+    and same(route10BattleTowerLawn, route10ReferenceLawn),
+  'Pokemon Tower landscaping fills donorless claimed cells with the same Route 10 grass in both modes')
+
 local Disk = assert(loadfile('lib/VoxelMeshDisk.lua'))({
   require = function(name)
     if name == 'CommunityVisuals' then return Community end
@@ -246,11 +263,11 @@ check(route10Cache == fingerprint('ROUTE_10', true, false),
   'Route 10 is not a CITY GROUND cache dependency')
 check(route10Cache ~= fingerprint('ROUTE_10', false, true),
   'Route 10 interior terrain remains a global GRASS cache dependency')
-check(route10Cache:find('route10-lavender-approach-v1', 1, true) ~= nil,
+check(route10Cache:find('route10-lavender-approach-v2-tower-lawn', 1, true) ~= nil,
   'Route 10 body cache fingerprints the new cave-to-Lavender coverage')
 local route10Aux = Disk.fingerprint(cacheMap('ROUTE_10'), 'aux', nil, 'aux')
-check(route10Aux:find('route10-tower-flowerbed-v1', 1, true) ~= nil,
-  'Route 10 auxiliary cache fingerprints the Legendary Tower flowerbed geometry')
+check(route10Aux:find('route10-tower-flowerbed-v2-baseline', 1, true) ~= nil,
+  'Route 10 auxiliary cache fingerprints the baseline Tower flowerbed geometry')
 local palletCache = fingerprint('PALLET_TOWN', false, false)
 check(palletCache == fingerprint('PALLET_TOWN', true, false),
   'CITY GROUND does not invalidate unrelated Overworld maps')

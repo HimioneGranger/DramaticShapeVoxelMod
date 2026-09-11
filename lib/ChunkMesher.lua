@@ -886,6 +886,19 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
       and ty >= th - ROUTE10_LAVENDER_APPROACH_ROWS and ty < th
   end
 
+  -- Pokemon Tower's claim-only Route 10 half is presentation metadata owned
+  -- by Buildings. Keep its exposed floor as a small Lavender lawn in BOTH
+  -- visual modes: the Legendary option may evolve independently, while the
+  -- approved grass/flower landscaping remains part of Battle Art. This also
+  -- gives claimed cells with no neighbour-voted donor an opaque floor instead
+  -- of exposing the neutral world underlay as a grey square.
+  local function route10TowerLandscapeAt(tx, ty)
+    local bed = S.lavenderFlowerbed
+    return tileset.id == "OVERWORLD" and mapId == "ROUTE_10" and bed
+      and tx >= bed.minX and tx <= bed.maxX
+      and ty >= bed.minY and ty <= bed.maxY
+  end
+
   -- TEST402 Kanto bedrock. TerrainAtlas writes these four warm-stone
   -- swatches into the first row of every authored ledge tile.  Sampling
   -- those texels keeps the replacement inside the existing terrain atlas:
@@ -2498,7 +2511,14 @@ local function runGeometry(map, bodyOnly, masks, sink, waterSink, visualSinks)
         -- an object stands here; paint its synthesized ground and let the
         -- prebuilt prism quads (appended below) carry the art
         local g = S.ground[k]
-        if g then
+        if route10TowerLandscapeAt(tx, ty) then
+          -- This floor is deliberately independent of the GRASS option. Use
+          -- the current Route 10 grass donor, so Battle Art keeps its own
+          -- atlas colour while Legendary keeps its already-approved bright
+          -- palette. The building/flower claims and collision remain intact.
+          kantoGrassTop(tx, ty, tx * 8, ty * 8, 0,
+                        aoShades(tx, ty, 0, 1))
+        elseif g then
           local caveKind = caveSurfaceKind({ class="ground" }, g)
           if viridianForest then
             forestGroundTop(tx, ty, tx * 8, ty * 8, 0, 0, 1)

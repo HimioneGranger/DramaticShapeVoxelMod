@@ -4629,16 +4629,17 @@ function Structures.buildFlowers(S, map, tw, th, x0, x1, y0, y1, data)
   end
 end
 
--- Legendary landscaping for the blocked rectangle behind Pokemon Tower.
+-- Lavender landscaping for the blocked rectangle behind Pokemon Tower.
 -- Buildings records the exact `pokemon_tower_top` match, so this follows the
 -- authored seam footprint if the map ever moves rather than depending on a
--- camera screenshot coordinate. The flowers are presentation-only standees:
--- they do not claim cells, alter collision, rewrite source tiles, or change
--- encounter data. Route 10 remains controlled by the broad GRASS option.
+-- camera screenshot coordinate. The approved flowerbed is now Battle Art
+-- baseline as well as Legendary: future Legendary replacements can change
+-- independently without removing this Lavender-specific scenery. The flowers
+-- are presentation-only standees; they do not claim cells, alter collision,
+-- rewrite source tiles, or change encounter data.
 function Structures.buildLavenderFlowerbed(S, map, data)
   if not (S and S.lavenderFlowerbed and data) then return 0 end
   if tostring(map.id or ""):upper() ~= "ROUTE_10" then return 0 end
-  if not CommunityVisuals.customGrass() then return 0 end
 
   local bed = S.lavenderFlowerbed
   local tpl = flowerTemplate(map, data, OVERWORLD_FLOWER_TILE)
